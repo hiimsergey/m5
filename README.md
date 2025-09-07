@@ -1,46 +1,49 @@
-#m5
-An audacious m4 alternative, written in Zig.
+# m5
+A dead-simple m4 alternative, written in Zig.
 
-## TODO goal
-- be a line-based preprocessor, as opposed to in-line-based pre-processors as [GNU m4](https://www.gnu.org/software/m4/m4.html)
-- let m5 files also be valid files in their respective language
-- be brief and readable
-- preprocess multiple files with one command
+## Goals
+- m5 is a line-based preprocessor, like [cpp](https:/example.com/TODO), meaning it only supports adding/removing entire lines, unlike m4, which can also preprocess in-line. That makes the syntax much easier.
+- m5 files should be valid files in their respective language. m5 syntax can be hidden in any comment syntax with the `--prefix` flag.
+- m5 syntax should be brief and intuitive
+- m5 allows preprocessing multiple files with one command, avoiding awkward shell scripts.
 
 ## TODO Syntax
-```m4
-EXPRESSIONS:
-	if [CONDITION] then
-	end
+m5 only supports if-else blocks with numeric or boolean variables as expressions.
 
-	if [CONDITION] then
-	else if [CONDITION] then
-	end
+Let's take C as an example and "// m5" as a prefix.
 
-CONDITIONS:
-	+MACRO – MACRO is defined
-	-MACRO – MACRO is not defined
-	+[M1, M2] – either of M1 or M2 is defined
-	+M1 +M2 – both M1 and M2 defined
+### If clauses
+```c
+int main(void) {
+    // m5 if ALICE
+    printf("Hello, Alice!\n");
+    // m5 end
+
+	return 0;
+}
 ```
 
-## TODO Usage
+### If-else
+
+### Negating variables
+
+### AND/OR operations
+
+### Numeric arguments
+
+## TODO CLI Usage
 ```
 m5 [OPTIONS]
 
 OPTIONS
-	--define,   -D [MACRO]
-	--prefix,   -p [PREFIX]
-	--output,   -o [OUTPUT]
-	--undefine, -U [MACRO]
-	--verbose,  -v
+	-D[MACRO]=[VALUE]
+	-D[MACRO]
+	--prefix,  -p [PREFIX]
+	--output,  -o [OUTPUT]
+	--verbose, -v
 ```
 
-## TODO Examples
-```sh
-m5 -D something.m5
-```
-
+### Examples
 ```sh
 m5 \
 	--prefix "-- m5" -DSERGEY \
@@ -48,4 +51,39 @@ m5 \
 	m5/keys.m5.lua -o lua/keys.lua \
 	m5/lazy.m5.lua -o lua/lazy.lua \
 	m5/opts.m5.lua -o lua/opts.lua
+```
+
+## Preprocessing example
+Again, let's take C as an example and "// m5" as a prefix.
+
+```c
+// foo.m5.c
+int main(void) {
+	// m5 if ALICE
+	printf("Hello, Alice!\n");
+	// m5 end
+	
+	return 0;
+}
+```
+
+The command `m5 --prefix "// m5" foo.m5.c -o foo.c` results in this file content at `foo.c`:
+
+```c
+// foo.c
+int main(void) {
+	
+	return 0;
+}
+```
+
+But `m5 --prefix "// m5" -DALICE foo.m5.c -o foo.c` results in:
+
+```c
+// foo.c
+int main(void) {
+	printf("Hello, Alice!\n");
+	
+	return 0;
+}
 ```

@@ -99,11 +99,9 @@ const preprocessor = struct {
 inline fn contains(haystack: []const []const u8, needle: []const u8) bool {
 	return std.mem.containsAtLeast(u8, @ptrCast(haystack), 1, needle);
 }
-
 inline fn eql(a: []const u8, b: []const u8) bool {
 	return std.mem.eql(u8, a, b);
 }
-
 inline fn startswith(a: []const u8, b: []const u8) bool {
 	return std.mem.startsWith(u8, a, b);
 }
@@ -122,4 +120,7 @@ pub fn main() !void {
 
 	try preprocessor.validate_args(args);
 	try preprocessor.run(allocator, &ctx, args);
+
+	// TODO NOTE
+	// implement PEMDAS
 }
