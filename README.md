@@ -37,7 +37,7 @@ m5 [OPTIONS]
 
 OPTIONS
 	-D[MACRO]=[VALUE]
-	-D[MACRO]
+	-U[MACRO]
 	--prefix,  -p [PREFIX]
 	--output,  -o [OUTPUT]
 	--verbose, -v
