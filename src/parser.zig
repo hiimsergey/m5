@@ -1,3 +1,7 @@
+const std = @import("std");
+const expectError = std.testing.expectError;
+const expectEqual = std.testing.expectEqual;
+
 const M5Error = @import("error.zig").M5Error;
 
 const State = enum(u8) {
@@ -9,7 +13,7 @@ const State = enum(u8) {
 
 pub fn validate(condition: []const u8) !void {
 	var indentation_level: usize = 0;
-	var state = State.InExpression;
+	var state = State.ExpectingExpression;
 
 	var i: usize = 0;
 	while (i < condition.len) : (i += 1) {
@@ -79,11 +83,92 @@ pub fn validate(condition: []const u8) !void {
 		}
 	}
 
+	// TODO handle variable negations: !A
+
 	if (indentation_level > 0 or (state != .InExpression and state != .InNumber))
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub fn parse(condition: []const u8) bool {
+pub inline fn parse(condition: []const u8) bool {
+	return try parse_or(condition) > 0;
+}
+
+fn parse_or(condition: []const u8) !u16 {
+	// TODO NOW
 	_ = condition;
-	// TOOD NOW
+}
+
+test "Condition validation" {
+	try validate("a & b | c");
+	try validate("a & (b & c) | d | (a | (b & c))");
+	try validate("(((b)))");
+	try validate("a < 5");
+	try validate("a < b < c");
+	try validate("a != b");
+
+	try expectError(M5Error.InvalidConditionSyntax, validate("a |"));
+	try expectError(M5Error.InvalidConditionSyntax, validate("a ! b"));
+	try expectError(M5Error.InvalidConditionSyntax, validate("2bad"));
+}
+
+test "Condition parsing: Literals" {
+	try expectEqual(try parse("5 > 2 & 1 & 0"), false);
+	try expectEqual("!FOO", true);
+}
+
+test "Condition parsing: Logic chains" {
+	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	defer map.deinit();
+
+	try map.put("A", 1);
+	try map.put("B", 1);
+	try map.put("C", 0);
+	try expectEqual(try parse("A & B | C"), true);
+
+	map.clearRetainingCapacity();
+	try map.put("A", 1);
+	try map.put("B", 1);
+	try map.put("C", 0);
+	try expectEqual(try parse("A | B & C"), true);
+}
+
+test "Condition parsing: AND" {
+	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	defer map.deinit();
+
+	try map.put("A", 1);
+	try map.put("B", 1);
+	try map.put("C", 0);
+	try expectEqual(try parse("A & B & C"), false);
+}
+
+test "Condition parsing: OR" {
+	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	defer map.deinit();
+
+	try map.put("FOO", 1);
+	try map.put("BAR", 0);
+	try map.put("BAZ", 0);
+	try expectEqual(try parse("FOO | BAR | BAZ"), true);
+
+	map.clearRetainingCapacity();
+	try map.put("FOO", 0);
+	try map.put("BAR", 1);
+	try map.put("BAZ", 0);
+	try expectEqual(try parse("FOO | BAR | BAZ"), true);
+
+	map.clearRetainingCapacity();
+	try map.put("FOO", 0);
+	try map.put("BAR", 0);
+	try map.put("BAZ", 1);
+	try expectEqual(try parse("FOO | BAR | BAZ"), true);
+}
+
+test "Condition parsing: Comparing" {
+	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	defer map.deinit();
+
+	try map.put("A", 1);
+	try map.put("B", 0);
+	try expectEqual(try parse("A != B"), true);
 }
