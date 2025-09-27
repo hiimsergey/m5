@@ -5,7 +5,7 @@ const arguments = @import("arguments.zig");
 const Allocator = std.mem.Allocator;
 const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
 const M5Error = @import("error.zig").M5Error;
-const Preprocessor = @import("preprocessor.zig").Preprocessor;
+const Preprocessor = @import("Preprocessor.zig");
 
 pub fn main() M5Error!void {
 	var aw = AllocatorWrapper.init();

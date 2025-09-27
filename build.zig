@@ -1,6 +1,6 @@
 const Build = @import("std").Build;
 
-// Latest Zig version as of writing this: 0.14.1
+// Latest Zig version as of writing this: 0.15.1
 pub fn build(b: *Build) void {
 	// Options
 	const target = b.standardTargetOptions(.{});

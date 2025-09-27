@@ -11,6 +11,62 @@ const State = enum(u8) {
 	ExpectingOperator
 };
 
+const ConditionSplit = struct {
+	expression: []const u8,
+	token: u8,
+
+	pub fn init(expression: []const u8, token: u8) ConditionSplit {
+		return .{ .expression = expression, .token = token };
+	}
+
+	pub fn next(self: *ConditionSplit) ?[]const u8 {
+		if (self.expression.len == 0) return null;
+		self.expression = std.mem.trimLeft(u8, self.expression, " ");
+
+		if (self.expression[0] == '(') return self.end_bracket();
+
+		for (0..self.expression.len) |i| {
+			if (self.expression[i] == self.token) {
+				const result = self.expression[0..i];
+				self.expression = self.expression[i + 1..];
+				return result;
+			}
+		}
+		const result = self.expression;
+		self.expression = null;
+		return result;
+	}
+
+	fn end_bracket(self: *ConditionSplit) []const u8 {
+		var depth: usize = 1;
+		for (1..self.expression.len) |i| switch (i) {
+			'(' => depth += 1,
+			')' => {
+				depth -= 1;
+				if (depth == 0) {
+					if (i + 1 == self.expression.len) {
+						const result = self.expression;
+						self.expression = self.expression[0..0];
+						return result;
+					}
+					for (i + 1..self.expression.len) |end_i| {
+						if (self.expression[end_i] == self.token) {
+							const result = self.expression[0..end_i];
+							self.expression = self.expression[end_i + 1..];
+							return result;
+						}
+					}
+					const result = self.expression;
+					self.expression = null;
+					return result;
+				}
+			},
+			else => continue
+		};
+		unreachable;
+	}
+};
+
 pub fn validate(condition: []const u8) !void {
 	var indentation_level: usize = 0;
 	var state = State.ExpectingExpression;
@@ -95,7 +151,89 @@ pub inline fn parse(condition: []const u8) bool {
 
 fn parse_or(condition: []const u8) !u16 {
 	// TODO NOW
-	_ = condition;
+	var result: u16 = 0;
+
+	var iter = ConditionSplit.init(condition, '|');
+	while (iter.next()) |it| result +|= if (it[0] == '(') try parse(it[1..it.len - 1])
+		else try parse_and(it);
+
+	return result;
+}
+
+fn parse_and(condition: []const u8) !u16 {
+	var result: u16 = 1;
+
+	var iter = ConditionSplit.init(condition, '&');
+	while (iter.next()) |it| result *|= if (it[0] == '(') try parse(it[1..it.len - 1])
+		else try parse_cmp(it);
+
+	return result;
+}
+
+fn parse_cmp(condition: []const u8) !u16 {
+	for (0..condition.len) |i| {
+		switch (condition[i]) {
+			'>' => {
+				const lhs = try parse_term(condition[0..i]);
+
+				if (condition[i + 1] == '=') {
+					const rhs = try parse_term(condition[i + 2..]);
+					return @intFromBool(lhs >= rhs);
+				} else {
+					const rhs = try parse_term(condition[i + 1..]);
+					return @intFromBool(lhs > rhs);
+				}
+			},
+			'<' => {
+				const lhs = try parse_term(condition[0..i]);
+
+				if (condition[i + 1] == '=') {
+					const rhs = try parse_term(condition[i + 2..]);
+					return @intFromBool(lhs <= rhs);
+				} else {
+					const rhs = try parse_term(condition[i + 1..]);
+					return @intFromBool(lhs < rhs);
+				}
+			},
+			'=' => {
+				const lhs = try parse_term(condition[0..i]);
+				const rhs = try parse_term(condition[i + 1..]);
+				return @intFromBool(lhs == rhs);
+			},
+			'!' => {
+				switch (condition[i + 1]) {
+					' ' => return M5Error.InvalidConditionSyntax,
+					'=' => {
+						const lhs = try parse_term(condition[0..i]);
+						const rhs = try parse_term(condition[i + 2..]);
+						return @intFromBool(lhs != rhs);
+					},
+					else => continue
+				}
+			},
+			else => continue
+		}
+	}
+
+	return try parse_term(condition);
+}
+
+fn parse_term(condition: []const u8) !u16 {
+	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
+
+	const term = iter.next();
+	if (term == null) return M5Error.InvalidConditionSyntax;
+
+	const it2 = iter.next();
+	if (it2 != null) return M5Error.InvalidConditionSyntax;
+
+	return std.fmt.parseInt(u16, term.?, 10) catch {
+		if (term.?[0] == '!') {
+			const value = map.get(term.?[1..]) orelse 0;
+			return if (value > 0) 0 else 1;
+		}
+		return map.get(term.?) orelse 0;
+	};
 }
 
 test "Condition validation" {
