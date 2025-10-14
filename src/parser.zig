@@ -3,6 +3,7 @@ const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
 
 const M5Error = @import("error.zig").M5Error;
+const StringSet = std.StringHashMap(void);
 
 const State = enum(u8) {
 	InExpression,
@@ -33,31 +34,21 @@ const ConditionSplit = struct {
 			}
 		}
 		const result = self.expression;
-		self.expression = null;
+		self.expression = &.{};
 		return result;
 	}
 
 	fn end_bracket(self: *ConditionSplit) []const u8 {
 		var depth: usize = 1;
-		for (1..self.expression.len) |i| switch (i) {
+		for (1..self.expression.len) |i| switch (self.expression[i]) {
 			'(' => depth += 1,
 			')' => {
 				depth -= 1;
-				if (depth == 0) {
-					if (i + 1 == self.expression.len) {
-						const result = self.expression;
-						self.expression = self.expression[0..0];
-						return result;
-					}
-					for (i + 1..self.expression.len) |end_i| {
-						if (self.expression[end_i] == self.token) {
-							const result = self.expression[0..end_i];
-							self.expression = self.expression[end_i + 1..];
-							return result;
-						}
-					}
-					const result = self.expression;
-					self.expression = null;
+				if (depth != 0) continue;
+
+				if (self.expression[i] == self.token or i == self.expression.len - 1) {
+					const result = self.expression[0..i];
+					self.expression = self.expression[i + 1..];
 					return result;
 				}
 			},
@@ -145,67 +136,66 @@ pub fn validate(condition: []const u8) !void {
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub inline fn parse(condition: []const u8) bool {
-	return try parse_or(condition) > 0;
+pub inline fn parse(condition: []const u8, macros: *const StringSet) bool {
+	return try parse_or(condition, macros) > 0;
 }
 
-fn parse_or(condition: []const u8) !u16 {
-	// TODO NOW
+fn parse_or(condition: []const u8, macros: *const StringSet) !u16 {
 	var result: u16 = 0;
 
 	var iter = ConditionSplit.init(condition, '|');
-	while (iter.next()) |it| result +|= if (it[0] == '(') try parse(it[1..it.len - 1])
-		else try parse_and(it);
+	while (iter.next()) |slice| result +|= if (slice[0] == '(') try parse(slice[1..], macros)
+		else try parse_and(slice, macros);
 
 	return result;
 }
 
-fn parse_and(condition: []const u8) !u16 {
+fn parse_and(condition: []const u8, macros: *const StringSet) !u16 {
 	var result: u16 = 1;
 
 	var iter = ConditionSplit.init(condition, '&');
-	while (iter.next()) |it| result *|= if (it[0] == '(') try parse(it[1..it.len - 1])
-		else try parse_cmp(it);
+	while (iter.next()) |slice| result *|= if (slice[0] == '(') try parse(slice[1..], macros)
+		else try parse_cmp(slice, macros);
 
 	return result;
 }
 
-fn parse_cmp(condition: []const u8) !u16 {
+fn parse_cmp(condition: []const u8, macros: *const StringSet) !u16 {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = try parse_term(condition[0..i]);
+				const lhs = try parse_term(condition[0..i], macros);
 
 				if (condition[i + 1] == '=') {
-					const rhs = try parse_term(condition[i + 2..]);
+					const rhs = try parse_term(condition[i + 2..], macros);
 					return @intFromBool(lhs >= rhs);
 				} else {
-					const rhs = try parse_term(condition[i + 1..]);
+					const rhs = try parse_term(condition[i + 1..], macros);
 					return @intFromBool(lhs > rhs);
 				}
 			},
 			'<' => {
-				const lhs = try parse_term(condition[0..i]);
+				const lhs = try parse_term(condition[0..i], macros);
 
 				if (condition[i + 1] == '=') {
-					const rhs = try parse_term(condition[i + 2..]);
+					const rhs = try parse_term(condition[i + 2..], macros);
 					return @intFromBool(lhs <= rhs);
 				} else {
-					const rhs = try parse_term(condition[i + 1..]);
+					const rhs = try parse_term(condition[i + 1..], macros);
 					return @intFromBool(lhs < rhs);
 				}
 			},
 			'=' => {
-				const lhs = try parse_term(condition[0..i]);
-				const rhs = try parse_term(condition[i + 1..]);
+				const lhs = try parse_term(condition[0..i], macros);
+				const rhs = try parse_term(condition[i + 1..], macros);
 				return @intFromBool(lhs == rhs);
 			},
 			'!' => {
 				switch (condition[i + 1]) {
 					' ' => return M5Error.InvalidConditionSyntax,
 					'=' => {
-						const lhs = try parse_term(condition[0..i]);
-						const rhs = try parse_term(condition[i + 2..]);
+						const lhs = try parse_term(condition[0..i], macros);
+						const rhs = try parse_term(condition[i + 2..], macros);
 						return @intFromBool(lhs != rhs);
 					},
 					else => continue
@@ -215,10 +205,10 @@ fn parse_cmp(condition: []const u8) !u16 {
 		}
 	}
 
-	return try parse_term(condition);
+	return try parse_term(condition, macros);
 }
 
-fn parse_term(condition: []const u8) !u16 {
+fn parse_term(condition: []const u8, macros: *const StringSet) !u16 {
 	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
 
 	const term = iter.next();
@@ -229,10 +219,10 @@ fn parse_term(condition: []const u8) !u16 {
 
 	return std.fmt.parseInt(u16, term.?, 10) catch {
 		if (term.?[0] == '!') {
-			const value = map.get(term.?[1..]) orelse 0;
+			const value = macros.get(term.?[1..]) orelse 0;
 			return if (value > 0) 0 else 1;
 		}
-		return map.get(term.?) orelse 0;
+		return macros.get(term.?) orelse 0;
 	};
 }
 

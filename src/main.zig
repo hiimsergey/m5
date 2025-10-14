@@ -20,5 +20,5 @@ pub fn main() M5Error!void {
 	defer std.process.argsFree(allocator, args);
 
 	try arguments.validate(args);
-	try Preprocessor.run(args);
+	try pp.run(args);
 }

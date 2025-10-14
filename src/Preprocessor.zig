@@ -13,7 +13,7 @@ allocator: Allocator,
 inputs: StringList,
 macros: StringSet,
 prefix: []const u8,
-verbose: bool,
+verbose: bool, // TODO IMPLEMENT
 
 pub fn init(allocator: Allocator) Self {
 	return .{
@@ -60,6 +60,7 @@ pub fn run(self: *Self, args: [][:0]u8) M5Error!void {
 		}
 	}
 
+	// TODO FINAL CHECK whats going on here
 	if (output_to_file) return;
 	try Self.validate_inputs();
 	const stdout = std.io.getStdOut().writer();
@@ -97,7 +98,7 @@ fn preprocess(self: *Self, writer: anytype) !void {
 			if (a.startswith(line_wo_prefix, "if") or
 				a.startswith(line_wo_prefix, "elif")) {
 				const condition = line_wo_prefix["if".len..];
-				cur_condition = parser.parse(condition);
+				cur_condition = parser.parse(condition, &self.macros);
 			} else if (a.startswith(line_wo_prefix, "end")) {
 				cur_condition = false;
 			}
