@@ -2,15 +2,16 @@
 A dead-simple m4 alternative, written in Zig.
 
 ## Goals
-- m5 is a line-based preprocessor, like [cpp](https:/example.com/TODO), meaning it only supports adding/removing entire lines, unlike m4, which can also preprocess in-line. That makes the syntax much easier.
-- m5 files should be valid files in their respective language. m5 syntax can be hidden in any comment syntax with the `--prefix` flag.
-- m5 syntax should be brief and intuitive
+- m5 is a line-based preprocessor, like [cpp](https:/example.com/TODO), meaning it only supports adding/removing entire lines, unlike m4, which can also preprocess inline. That makes the syntax much easier.
+- m5 files should be valid files in their respective language. m5 syntax can be hidden in any comment syntax with the `--prefix` flag, for example in programming language comments.
+- m5 syntax should be brief and intuitive.
 - m5 allows preprocessing multiple files with one command, avoiding awkward shell scripts.
 
 ## TODO Syntax
 m5 only supports if-else blocks with numeric or boolean variables as expressions.
 
 Let's take C as an example and "// m5" as a prefix.
+TODO mention that leading spaces and tabs are no issue
 
 ### If clauses
 ```c
