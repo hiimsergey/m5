@@ -1,5 +1,6 @@
 const std = @import("std");
 const a = @import("alias.zig");
+const arguments = @import("arguments.zig");
 const parser = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;
@@ -16,21 +17,21 @@ macros: StringSet,
 prefix: []const u8,
 verbose: bool, // TODO IMPLEMENT
 
-pub fn init(allocator: Allocator) Self {
+pub fn init(allocator: Allocator) !Self {
 	return .{
 		.allocator = allocator,
-		.inputs = StringList.init(allocator),
+		.inputs = try StringList.initCapacity(allocator, 2),
 		.macros = StringSet.init(allocator),
 		.prefix = "",
 		.verbose = false
 	};
 }
 
-pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) M5Error!void {
+pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	const cwd = std.fs.cwd();
 	var output_to_file: bool = undefined;
 
-	if (a.contains(args, "-v")) self.verbose = true;
+	if (a.contains_str(args, "-v")) self.verbose = true;
 
 	for (args[1..], 1..) |arg, i| {
 		self.clear();
@@ -41,11 +42,11 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) M5Error!void {
 			continue;
 		}
 		else if (a.startswith(arg, "-D")) {
-			const glued_arg_len = args.GLUED[0].len;
+			const glued_arg_len = arguments.GLUED[0].len;
 			try self.macros.put(arg[glued_arg_len..], {});
 		}
 		else if (a.startswith(arg, "-U")) {
-			const glued_arg_len = args.GLUED[0].len;
+			const glued_arg_len = arguments.GLUED[0].len;
 			_ = self.macros.remove(arg[glued_arg_len..]);
 		}
 		else if (a.eql(arg, "-p")) {
@@ -58,13 +59,13 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) M5Error!void {
 			defer file.close();
 
 			var writer_buf: [1024]u8 = undefined;
-			const writer = file.writer(&writer_buf);
+			var writer = file.writer(&writer_buf);
 
 			try self.validate_inputs(allocator);
 			try self.preprocess(allocator, &writer);
 		} else {
 			// Input file
-			try self.inputs.append(arg);
+			try self.inputs.append(allocator, arg);
 		}
 	}
 
@@ -72,7 +73,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) M5Error!void {
 	try self.validate_inputs(allocator);
 	
 	var stdout_buf: [1024]u8 = undefined;
-	const stdout = std.fs.File.stdout().writer(&stdout_buf);
+	var stdout = std.fs.File.stdout().writer(&stdout_buf);
 	try self.preprocess(allocator, &stdout);
 }
 
@@ -84,7 +85,7 @@ fn clear(self: *Self) void {
 fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 	var cwd = std.fs.cwd();
 
-	for (self.inputs) |input| {
+	for (self.inputs.items) |input| {
 		var file = try cwd.openFile(input, .{ .mode = .read_only });
 		defer file.close();
 
@@ -96,7 +97,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 
 		var cur_condition = false;
 
-		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) {
+		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| {
 			const line = allocating.written();
 			defer {
 				allocating.clearRetainingCapacity();
@@ -112,7 +113,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 			if (a.startswith(line_wo_prefix, "if") or
 				a.startswith(line_wo_prefix, "elif")) {
 				const condition = line_wo_prefix["if".len..];
-				cur_condition = parser.parse(condition, &self.macros);
+				cur_condition = (try parser.parse(condition, &self.macros)) > 0;
 			} else if (a.startswith(line_wo_prefix, "end")) {
 				cur_condition = false;
 			}
@@ -126,7 +127,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 fn validate_inputs(self: *Self, allocator: Allocator) !void {
 	var cwd = std.fs.cwd();
 
-	for (self.inputs) |input| {
+	for (self.inputs.items) |input| {
 		var awaiting_end = false;
 
 		var file = try cwd.openFile(input, .{ .mode = .read_only });
@@ -138,7 +139,7 @@ fn validate_inputs(self: *Self, allocator: Allocator) !void {
 		var allocating = std.Io.Writer.Allocating.init(allocator);
 		defer allocating.deinit();
 
-		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) {
+		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| {
 			const line = allocating.written();
 			defer {
 				allocating.clearRetainingCapacity();
@@ -155,19 +156,19 @@ fn validate_inputs(self: *Self, allocator: Allocator) !void {
 				try parser.validate(condition);
 			}
 			else if (a.startswith(line_wo_prefix, "elif")) {
-				if (!awaiting_end) return M5Error.InvalidSyntax;
+				if (!awaiting_end) return M5Error.InvalidKeywordSyntax;
 				const condition = line_wo_prefix["elif".len..];
 				try parser.validate(condition);
 			}
 			else if (a.startswith(line_wo_prefix, "end")) {
-				if (!awaiting_end) return M5Error.InvalidSyntax;
+				if (!awaiting_end) return M5Error.InvalidKeywordSyntax;
 				awaiting_end = false;
 			}
 		}
 	}
 }
 
-pub fn deinit(self: *Self) void {
-	self.inputs.deinit();
+pub fn deinit(self: *Self, allocator: Allocator) void {
+	self.inputs.deinit(allocator);
 	self.macros.deinit();
 }

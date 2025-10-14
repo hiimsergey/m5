@@ -7,14 +7,14 @@ const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
 const M5Error = @import("error.zig").M5Error;
 const Preprocessor = @import("Preprocessor.zig");
 
-pub fn main() M5Error!void {
+pub fn main() !void {
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
 
 	const allocator = aw.allocator();
 
-	var pp = Preprocessor.init(allocator);
-	defer pp.deinit();
+	var pp = try Preprocessor.init(allocator);
+	defer pp.deinit(allocator);
 
 	const args = try std.process.argsAlloc(allocator);
 	defer std.process.argsFree(allocator, args);

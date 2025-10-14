@@ -9,9 +9,11 @@ pub fn build(b: *Build) void {
 	// Executable declaration
 	const exe = b.addExecutable(.{
 		.name = "m5",
-		.root_source_file = b.path("src/main.zig"),
-		.target = target,
-		.optimize = optimize
+		.root_module = b.createModule(.{
+			.root_source_file = b.path("src/main.zig"),
+			.target = target,
+			.optimize = optimize
+		})
 	});
 
 	exe.linkLibC(); // Needed for `std.heap.c_allocator`

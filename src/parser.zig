@@ -136,11 +136,11 @@ pub fn validate(condition: []const u8) !void {
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub inline fn parse(condition: []const u8, macros: *const StringSet) bool {
-	return try parse_or(condition, macros) > 0;
+pub fn parse(condition: []const u8, macros: *const StringSet) M5Error!u16 {
+	return parse_or(condition, macros);
 }
 
-fn parse_or(condition: []const u8, macros: *const StringSet) !u16 {
+fn parse_or(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 	var result: u16 = 0;
 
 	var iter = ConditionSplit.init(condition, '|');
@@ -150,7 +150,7 @@ fn parse_or(condition: []const u8, macros: *const StringSet) !u16 {
 	return result;
 }
 
-fn parse_and(condition: []const u8, macros: *const StringSet) !u16 {
+fn parse_and(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 	var result: u16 = 1;
 
 	var iter = ConditionSplit.init(condition, '&');
@@ -160,7 +160,7 @@ fn parse_and(condition: []const u8, macros: *const StringSet) !u16 {
 	return result;
 }
 
-fn parse_cmp(condition: []const u8, macros: *const StringSet) !u16 {
+fn parse_cmp(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
@@ -208,7 +208,7 @@ fn parse_cmp(condition: []const u8, macros: *const StringSet) !u16 {
 	return try parse_term(condition, macros);
 }
 
-fn parse_term(condition: []const u8, macros: *const StringSet) !u16 {
+fn parse_term(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
 
 	const term = iter.next();
@@ -219,6 +219,9 @@ fn parse_term(condition: []const u8, macros: *const StringSet) !u16 {
 
 	return std.fmt.parseInt(u16, term.?, 10) catch {
 		if (term.?[0] == '!') {
+			// TODO NOW why are we even using a StringSet in the first place?
+			// when you're adding a macros, it should have the value of 1 by
+			// default.
 			const value = macros.get(term.?[1..]) orelse 0;
 			return if (value > 0) 0 else 1;
 		}
