@@ -4,10 +4,10 @@ const arguments = @import("arguments.zig");
 const parser = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;
+const File = std.fs.File;
 const M5Error = @import("error.zig").M5Error;
 const StringHashMap = std.StringHashMap;
 const StringList = std.ArrayList([]const u8);
-const Writer = std.fs.File.Writer;
 
 const Self = @This();
 
@@ -71,7 +71,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	try self.preprocess(allocator, &a.stdout);
 }
 
-fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
+fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 	var write_line = true;
 
 	for (self.inputs.items) |input| {

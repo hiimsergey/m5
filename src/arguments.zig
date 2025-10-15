@@ -1,3 +1,4 @@
+const std = @import("std");
 const a = @import("alias.zig");
 
 const M5Error = @import("error.zig").M5Error;
@@ -86,6 +87,15 @@ pub fn validate(args: [][:0]u8) !void {
 			);
 			return M5Error.BadArgs;
 		}
-		else inputs_encountered = true;
+		else {
+			_ = std.fs.cwd().statFile(arg) catch {
+				a.errln(
+					\\Could not open input file '{s}'!
+					, .{arg}
+				);
+				return M5Error.BadArgs;
+			};
+			inputs_encountered = true;
+		}
 	}
 }
