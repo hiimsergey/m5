@@ -27,11 +27,15 @@ pub fn init(allocator: Allocator) !Self {
 	};
 }
 
+fn clear(self: *Self) void {
+	self.inputs.shrinkRetainingCapacity(0);
+	self.macros.clearRetainingCapacity();
+}
+
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
-	const cwd = std.fs.cwd();
 	var output_to_file: bool = undefined;
 
-	if (a.contains_str(args, "-v")) self.verbose = true;
+	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
 
 	for (args[1..], 1..) |arg, i| {
 		self.clear();
@@ -55,7 +59,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		else if (a.eql(arg, "-o")) {
 			output_to_file = true;
 
-			var file = try cwd.openFile(args[i + 1], .{ .mode = .write_only });
+			var file = try std.fs.cwd().openFile(args[i + 1], .{ .mode = .write_only });
 			defer file.close();
 
 			var writer_buf: [1024]u8 = undefined;
@@ -76,16 +80,9 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	try self.preprocess(allocator, &a.stdout);
 }
 
-fn clear(self: *Self) void {
-	self.inputs.shrinkRetainingCapacity(0);
-	self.macros.clearRetainingCapacity();
-}
-
 fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
-	var cwd = std.fs.cwd();
-
 	for (self.inputs.items) |input| {
-		var file = try cwd.openFile(input, .{ .mode = .read_only });
+		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
 		defer file.close();
 
 		var reader_buf: [1024]u8 = undefined;
@@ -97,15 +94,16 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 		var cur_condition = false;
 
 		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| {
-			const line = allocating.written();
+			const line: []u8 = allocating.written();
 			defer {
 				allocating.clearRetainingCapacity();
 				reader.interface.toss(1); // skip newline
 			}
 
+			// TODO leading whitespace should be ignored
 			if (!a.startswith(line, self.prefix)) {
-				if (!cur_condition) continue;
-				try writer.interface.writeAll(line);
+				if (cur_condition) try writer.interface.writeAll(line);
+				continue;
 			}
 
 			const line_wo_prefix = a.trimleft(line[self.prefix.len..], " \t");
@@ -118,6 +116,8 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 				cur_condition = false;
 			}
 		}
+
+		if (self.verbose) a.println("Preprocessed {s}!\n", .{input});
 	}
 
 	self.inputs.clearRetainingCapacity();
@@ -125,12 +125,10 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 }
 
 fn validate_inputs(self: *Self, allocator: Allocator) !void {
-	var cwd = std.fs.cwd();
-
 	for (self.inputs.items) |input| {
 		var awaiting_end = false;
 
-		var file = try cwd.openFile(input, .{ .mode = .read_only });
+		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
 		defer file.close();
 
 		var reader_buf: [1024]u8 = undefined;

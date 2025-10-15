@@ -218,10 +218,6 @@ fn parse_term(condition: []const u8, macros: *const StringHashMap([]const u8)) M
 		if (err_term == error.Overflow) return M5Error.System;
 		if (term.?[0] != '!') return macros.get(term.?) != null;
 
-		// TODO PLAN
-		// check if its a number
-		// check if its defined as a macro
-
 		const rest = term.?[1..];
 		const rest_parse_result = std.fmt.parseInt(i32, rest, 10) catch |err_rest| {
 			if (err_rest == error.Overflow) return M5Error.System;

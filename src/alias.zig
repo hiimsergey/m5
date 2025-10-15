@@ -38,17 +38,19 @@ pub fn print_help() void {
 		\\        Defines a new macro with [MACRO] as the name and [VALUE]
 		\\        as the string value. If =[VALUE] is omitted, then the macro acts
 		\\        as a boolean set to true.
-		\\    --prefix,  -p [PREFIX]
+		\\    -p [PREFIX]
 		\\        Sets [PREFIX] as the line prefix. The preprocessor reads
 		\\        lines starting with the prefix (disregarding leading whitespace
 		\\        though) for m5 syntax.
-		\\    --output,  -o [OUTPUT]
+		\\    -o [OUTPUT]
 		\\        Sets [OUTPUT] as the destination file the preprocessed text
 		\\        of all inputs given prior. After this, new inputs can be passed
 		\\        for another output. If no output is given at all, the result is
 		\\        written into stdout.
-		\\    --verbose, -v
+		\\    -v
 		\\        Log every successfully preprocessed input.
+		\\    -h, --help
+		\\        Print this message.
 		, .{}
 	);
 }
