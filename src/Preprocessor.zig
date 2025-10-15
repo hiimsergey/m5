@@ -15,7 +15,7 @@ allocator: Allocator,
 inputs: StringList,
 macros: StringHashMap([]const u8),
 prefix: []const u8,
-verbose: bool, // TODO IMPLEMENT
+verbose: bool,
 
 pub fn init(allocator: Allocator) !Self {
 	return .{
@@ -74,6 +74,8 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 }
 
 fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
+	var write_line = true;
+
 	for (self.inputs.items) |input| {
 		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
 		defer file.close();
@@ -84,31 +86,40 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 		var allocating = std.Io.Writer.Allocating.init(allocator);
 		defer allocating.deinit();
 
-		var cur_condition = false;
-
-		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null)
-		|_| {
+		var linenr: usize = 1;
+		lines: while (
+			reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
+		) |_| : ({
+			allocating.clearRetainingCapacity();
+			reader.interface.toss(1); // skip newline
+			linenr += 1;
+		}) {
 			const line: []u8 = allocating.written();
-			defer {
-				allocating.clearRetainingCapacity();
-				reader.interface.toss(1); // skip newline
-			}
 
 			// TODO leading whitespace should be ignored
 			if (!a.startswith(line, self.prefix)) {
-				if (cur_condition) try writer.interface.writeAll(line);
+				if (write_line) try writer.interface.writeAll(line);
 				continue;
 			}
 
 			const line_wo_prefix = a.trimleft(line[self.prefix.len..], " \t");
-			if (a.startswith(line_wo_prefix, "if") or
-				a.startswith(line_wo_prefix, "elif")) {
-				const condition = line_wo_prefix["if".len..];
-				cur_condition = try parser.parse(condition, &self.macros);
+			inline for ([_][]const u8{"if", "elif"}) |keyword| {
+				if (a.startswith(line_wo_prefix, keyword)) {
+					const condition = line_wo_prefix[keyword.len..];
+					write_line = try parser.parse(condition, &self.macros);
+					continue :lines;
+				}
 			}
-			else if (a.startswith(line_wo_prefix, "end")) {
-				cur_condition = false;
+			if (a.startswith(line_wo_prefix, "end")) {
+				write_line = true;
+				continue;
 			}
+
+			a.errln(
+				"{s}: line {d}: Invalid keyword! Should be 'if', 'elif' or 'end'",
+				.{input, linenr}
+			);
+			return M5Error.InvalidKeywordSyntax;
 		}
 
 		if (self.verbose) a.println("Preprocessed {s}!\n", .{input});

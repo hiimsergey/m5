@@ -16,18 +16,16 @@ pub fn main() u8 {
 	const args = std.process.argsAlloc(allocator) catch return 1;
 	defer std.process.argsFree(allocator, args);
 
-	// TODO FINAL CHECK how the program behaves when we put -h in the middle
-	if (args.len < 2 or a.eql(args[1], "--help") or a.eql(args[1], "-h")) {
-		a.print_help();
-		a.flush();
-		return 1;
-	}
+	arguments.validate(args) catch return 1;
 
 	var pp = Preprocessor.init(allocator) catch return 1;
 	defer pp.deinit(allocator);
 
-	arguments.validate(args) catch return 1;
 	pp.run(allocator, args) catch return 1;
 
 	return 0;
 }
+
+// TODO FINAL COMMENT ALL
+// TODO DEBUG "m5 foo -p bar" implicitly returns 1
+// TODO FINAL CHECK if verbose works

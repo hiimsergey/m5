@@ -9,21 +9,21 @@ pub const AllocatorWrapper = if (builtin.mode == .Debug) struct {
 
 	dbg_state: DebugAllocator,
 
-	/// Initializes Zig's `DebugAllocator`.
+	/// Initialize Zig's `DebugAllocator`.
 	pub fn init() Self {
 		return .{ .dbg_state = DebugAllocator.init };
 	}
 
-	/// Returns the `DebugAllocator`'s allocator.
+	/// Return the `DebugAllocator`'s allocator.
 	pub fn allocator(self: *Self) std.mem.Allocator {
 		return self.dbg_state.allocator();
 	}
 
-	/// Deinits Zig's `DebugAllocator` and log an error message if
+	/// Deinit Zig's `DebugAllocator` and log an error message if
 	/// the program contains Zig-side memory leaks.
 	pub fn deinit(self: *Self) void {
 		if (self.dbg_state.deinit() == .leak)
-			std.debug.print("ERROR: Leaks found!", .{});
+			std.debug.print("ERROR: Leaks found!\n", .{});
 	}
 } else struct {
 	const Self = @This();
@@ -31,11 +31,11 @@ pub const AllocatorWrapper = if (builtin.mode == .Debug) struct {
 	/// Trivial struct initialization.
 	pub fn init() Self { return .{}; }
 
-	/// Simply returns `@import("std").heap.c_allocator`.
+	/// Simply return `std.heap.c_allocator`.
 	pub fn allocator(_: *Self) std.mem.Allocator {
 		return std.heap.c_allocator;
 	}
 
-	/// NOP function.
+	/// no-op. 
 	pub fn deinit(_: *Self) void {}
 };
