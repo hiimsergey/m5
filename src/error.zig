@@ -1,1 +1,1 @@
-pub const M5Error = error { BadArgs, InvalidConditionSyntax, InvalidKeywordSyntax };
+pub const M5Error = error { BadArgs, InvalidConditionSyntax, InvalidKeywordSyntax, System };

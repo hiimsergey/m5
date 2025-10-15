@@ -5,15 +5,15 @@ const parser = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;
 const M5Error = @import("error.zig").M5Error;
+const StringHashMap = std.StringHashMap;
 const StringList = std.ArrayList([]const u8);
-const StringSet = std.StringHashMap(void);
 const Writer = std.fs.File.Writer;
 
 const Self = @This();
 
 allocator: Allocator,
 inputs: StringList,
-macros: StringSet,
+macros: StringHashMap([]const u8),
 prefix: []const u8,
 verbose: bool, // TODO IMPLEMENT
 
@@ -21,7 +21,7 @@ pub fn init(allocator: Allocator) !Self {
 	return .{
 		.allocator = allocator,
 		.inputs = try StringList.initCapacity(allocator, 2),
-		.macros = StringSet.init(allocator),
+		.macros = StringHashMap([]const u8).init(allocator),
 		.prefix = "",
 		.verbose = false
 	};
@@ -43,7 +43,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		}
 		else if (a.startswith(arg, "-D")) {
 			const glued_arg_len = arguments.GLUED[0].len;
-			try self.macros.put(arg[glued_arg_len..], {});
+			try self.macros.put(arg[glued_arg_len..], "");
 		}
 		else if (a.startswith(arg, "-U")) {
 			const glued_arg_len = arguments.GLUED[0].len;
@@ -63,7 +63,8 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 
 			try self.validate_inputs(allocator);
 			try self.preprocess(allocator, &writer);
-		} else {
+		}
+		else {
 			// Input file
 			try self.inputs.append(allocator, arg);
 		}
@@ -72,9 +73,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	if (output_to_file) return;
 	try self.validate_inputs(allocator);
 	
-	var stdout_buf: [1024]u8 = undefined;
-	var stdout = std.fs.File.stdout().writer(&stdout_buf);
-	try self.preprocess(allocator, &stdout);
+	try self.preprocess(allocator, &a.stdout);
 }
 
 fn clear(self: *Self) void {
@@ -113,8 +112,9 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 			if (a.startswith(line_wo_prefix, "if") or
 				a.startswith(line_wo_prefix, "elif")) {
 				const condition = line_wo_prefix["if".len..];
-				cur_condition = (try parser.parse(condition, &self.macros)) > 0;
-			} else if (a.startswith(line_wo_prefix, "end")) {
+				cur_condition = try parser.parse(condition, &self.macros);
+			}
+			else if (a.startswith(line_wo_prefix, "end")) {
 				cur_condition = false;
 			}
 		}

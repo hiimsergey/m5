@@ -2,16 +2,12 @@ const std = @import("std");
 const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
 
+const StringHashMap = std.StringHashMap;
 const M5Error = @import("error.zig").M5Error;
-const StringSet = std.StringHashMap(void);
 
-const State = enum(u8) {
-	InExpression,
-	InNumber,
-	ExpectingExpression,
-	ExpectingOperator
-};
+const State = enum(u8) {InExpression, InNumber, ExpectingExpression, ExpectingOperator};
 
+// TODO FINAL write tests
 const ConditionSplit = struct {
 	expression: []const u8,
 	token: u8,
@@ -136,31 +132,35 @@ pub fn validate(condition: []const u8) !void {
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub fn parse(condition: []const u8, macros: *const StringSet) M5Error!u16 {
+pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
 	return parse_or(condition, macros);
 }
 
-fn parse_or(condition: []const u8, macros: *const StringSet) M5Error!u16 {
-	var result: u16 = 0;
-
+fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
-	while (iter.next()) |slice| result +|= if (slice[0] == '(') try parse(slice[1..], macros)
-		else try parse_and(slice, macros);
 
+	while (iter.next()) |slice| {
+		const parse_result = if (slice[0] == '(') try parse(slice[1..], macros)
+			else try parse_and(slice, macros);
+		result = result or parse_result;
+	}
 	return result;
 }
 
-fn parse_and(condition: []const u8, macros: *const StringSet) M5Error!u16 {
-	var result: u16 = 1;
-
+fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+	var result = true;
 	var iter = ConditionSplit.init(condition, '&');
-	while (iter.next()) |slice| result *|= if (slice[0] == '(') try parse(slice[1..], macros)
-		else try parse_cmp(slice, macros);
 
+	while (iter.next()) |slice| {
+		const parse_result = if (slice[0] == '(') try parse(slice[1..], macros)
+			else try parse_cmp(slice, macros);
+		result = result and parse_result;
+	}
 	return result;
 }
 
-fn parse_cmp(condition: []const u8, macros: *const StringSet) M5Error!u16 {
+fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
@@ -168,27 +168,25 @@ fn parse_cmp(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 
 				if (condition[i + 1] == '=') {
 					const rhs = try parse_term(condition[i + 2..], macros);
-					return @intFromBool(lhs >= rhs);
-				} else {
-					const rhs = try parse_term(condition[i + 1..], macros);
-					return @intFromBool(lhs > rhs);
+					return lhs or !rhs;
 				}
+				const rhs = try parse_term(condition[i + 1..], macros);
+				return lhs and !rhs;
 			},
 			'<' => {
 				const lhs = try parse_term(condition[0..i], macros);
 
 				if (condition[i + 1] == '=') {
 					const rhs = try parse_term(condition[i + 2..], macros);
-					return @intFromBool(lhs <= rhs);
-				} else {
-					const rhs = try parse_term(condition[i + 1..], macros);
-					return @intFromBool(lhs < rhs);
+					return !lhs or rhs;
 				}
+				const rhs = try parse_term(condition[i + 1..], macros);
+				return !lhs and rhs;
 			},
 			'=' => {
 				const lhs = try parse_term(condition[0..i], macros);
 				const rhs = try parse_term(condition[i + 1..], macros);
-				return @intFromBool(lhs == rhs);
+				return lhs == rhs;
 			},
 			'!' => {
 				switch (condition[i + 1]) {
@@ -196,7 +194,7 @@ fn parse_cmp(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 					'=' => {
 						const lhs = try parse_term(condition[0..i], macros);
 						const rhs = try parse_term(condition[i + 2..], macros);
-						return @intFromBool(lhs != rhs);
+						return lhs != rhs;
 					},
 					else => continue
 				}
@@ -204,11 +202,10 @@ fn parse_cmp(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 			else => continue
 		}
 	}
-
 	return try parse_term(condition, macros);
 }
 
-fn parse_term(condition: []const u8, macros: *const StringSet) M5Error!u16 {
+fn parse_term(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
 	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
 
 	const term = iter.next();
@@ -217,16 +214,28 @@ fn parse_term(condition: []const u8, macros: *const StringSet) M5Error!u16 {
 	const it2 = iter.next();
 	if (it2 != null) return M5Error.InvalidConditionSyntax;
 
-	return std.fmt.parseInt(u16, term.?, 10) catch {
-		if (term.?[0] == '!') {
-			// TODO NOW why are we even using a StringSet in the first place?
-			// when you're adding a macros, it should have the value of 1 by
-			// default.
-			const value = macros.get(term.?[1..]) orelse 0;
-			return if (value > 0) 0 else 1;
-		}
-		return macros.get(term.?) orelse 0;
+	const term_parse_result = std.fmt.parseInt(i32, term.?, 10) catch |err_term| {
+		if (err_term == error.Overflow) return M5Error.System;
+		if (term.?[0] != '!') return macros.get(term.?) != null;
+
+		// TODO PLAN
+		// check if its a number
+		// check if its defined as a macro
+
+		const rest = term.?[1..];
+		const rest_parse_result = std.fmt.parseInt(i32, rest, 10) catch |err_rest| {
+			if (err_rest == error.Overflow) return M5Error.System;
+
+			const value = macros.get(term.?[1..]) orelse return true;
+			const value_parse_result = std.fmt.parseInt(i32, value, 10) catch |err_value| {
+				if (err_value == error.Overflow) return M5Error.System;
+				return false;
+			};
+			return value_parse_result == 0;
+		};
+		return rest_parse_result == 0;
 	};
+	return term_parse_result != 0;
 }
 
 test "Condition validation" {
@@ -237,9 +246,10 @@ test "Condition validation" {
 	try validate("a < b < c");
 	try validate("a != b");
 
-	try expectError(M5Error.InvalidConditionSyntax, validate("a |"));
-	try expectError(M5Error.InvalidConditionSyntax, validate("a ! b"));
-	try expectError(M5Error.InvalidConditionSyntax, validate("2bad"));
+	const ics = M5Error.InvalidConditionSyntax;
+	try expectError(ics, validate("a |"));
+	try expectError(ics, validate("a ! b"));
+	try expectError(ics, validate("2bad"));
 }
 
 test "Condition parsing: Literals" {
@@ -248,7 +258,7 @@ test "Condition parsing: Literals" {
 }
 
 test "Condition parsing: Logic chains" {
-	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
 	defer map.deinit();
 
 	try map.put("A", 1);
@@ -264,7 +274,7 @@ test "Condition parsing: Logic chains" {
 }
 
 test "Condition parsing: AND" {
-	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
 	defer map.deinit();
 
 	try map.put("A", 1);
@@ -274,7 +284,7 @@ test "Condition parsing: AND" {
 }
 
 test "Condition parsing: OR" {
-	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
 	defer map.deinit();
 
 	try map.put("FOO", 1);
@@ -296,7 +306,7 @@ test "Condition parsing: OR" {
 }
 
 test "Condition parsing: Comparing" {
-	var map = std.StringHashMap(u16).init(std.testing.allocator);
+	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
 	defer map.deinit();
 
 	try map.put("A", 1);
