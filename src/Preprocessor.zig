@@ -11,7 +11,6 @@ const Writer = std.fs.File.Writer;
 
 const Self = @This();
 
-allocator: Allocator,
 inputs: StringList,
 macros: StringHashMap([]const u8),
 prefix: []const u8,
@@ -19,7 +18,6 @@ verbose: bool,
 
 pub fn init(allocator: Allocator) !Self {
 	return .{
-		.allocator = allocator,
 		.inputs = try StringList.initCapacity(allocator, 2),
 		.macros = StringHashMap([]const u8).init(allocator),
 		.prefix = "",
