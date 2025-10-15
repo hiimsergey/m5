@@ -57,3 +57,9 @@ pub fn print_help() void {
 pub fn println(comptime fmt: []const u8, args: anytype) void {
 	stdout.interface.print(fmt ++ "\n", args) catch {};
 }
+pub fn errln(comptime msg: []const u8) void {
+	var stderr_buf: [1024]u8 = undefined;
+	var stderr = std.fs.File.stderr().writer(&stderr_buf);
+	stderr.interface.print(msg, .{}) catch {};
+	stderr.interface.flush() catch {};
+}

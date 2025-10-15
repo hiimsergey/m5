@@ -132,11 +132,13 @@ pub fn validate(condition: []const u8) !void {
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8))
+M5Error!bool {
 	return parse_or(condition, macros);
 }
 
-fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8))
+M5Error!bool {
 	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
 
@@ -148,7 +150,8 @@ fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) M5E
 	return result;
 }
 
-fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8))
+M5Error!bool {
 	var result = true;
 	var iter = ConditionSplit.init(condition, '&');
 
@@ -160,7 +163,8 @@ fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) M5
 	return result;
 }
 
-fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8))
+M5Error!bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
@@ -205,7 +209,8 @@ fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) M5
 	return try parse_term(condition, macros);
 }
 
-fn parse_term(condition: []const u8, macros: *const StringHashMap([]const u8)) M5Error!bool {
+fn parse_term(condition: []const u8, macros: *const StringHashMap([]const u8))
+M5Error!bool {
 	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
 
 	const term = iter.next();
@@ -223,8 +228,8 @@ fn parse_term(condition: []const u8, macros: *const StringHashMap([]const u8)) M
 			if (err_rest == error.Overflow) return M5Error.System;
 
 			const value = macros.get(term.?[1..]) orelse return true;
-			const value_parse_result = std.fmt.parseInt(i32, value, 10) catch |err_value| {
-				if (err_value == error.Overflow) return M5Error.System;
+			const value_parse_result = std.fmt.parseInt(i32, value, 10) catch |err_val| {
+				if (err_val == error.Overflow) return M5Error.System;
 				return false;
 			};
 			return value_parse_result == 0;

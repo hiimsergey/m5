@@ -41,17 +41,10 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		self.clear();
 		output_to_file = false;
 
-		// Probably the -v flag
-		if (arg[0] == '-') {
-			continue;
-		}
+		// Gotta be the -v flag
+		if (arg[0] == '-') continue
 		else if (a.startswith(arg, "-D")) {
-			const glued_arg_len = arguments.GLUED[0].len;
-			try self.macros.put(arg[glued_arg_len..], "");
-		}
-		else if (a.startswith(arg, "-U")) {
-			const glued_arg_len = arguments.GLUED[0].len;
-			_ = self.macros.remove(arg[glued_arg_len..]);
+			try self.macros.put(arg["-D".len..], "");
 		}
 		else if (a.eql(arg, "-p")) {
 			self.prefix = args[i + 1];
@@ -93,7 +86,8 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *Writer) !void {
 
 		var cur_condition = false;
 
-		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| {
+		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null)
+		|_| {
 			const line: []u8 = allocating.written();
 			defer {
 				allocating.clearRetainingCapacity();
@@ -137,7 +131,8 @@ fn validate_inputs(self: *Self, allocator: Allocator) !void {
 		var allocating = std.Io.Writer.Allocating.init(allocator);
 		defer allocating.deinit();
 
-		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| {
+		while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null)
+		|_| {
 			const line = allocating.written();
 			defer {
 				allocating.clearRetainingCapacity();

@@ -1,1 +1,6 @@
-pub const M5Error = error { BadArgs, InvalidConditionSyntax, InvalidKeywordSyntax, System };
+pub const M5Error = error {
+	BadArgs,
+	InvalidConditionSyntax,
+	InvalidKeywordSyntax,
+	System
+};
