@@ -32,10 +32,12 @@ fn clear(self: *Self) void {
 
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	var output_to_file: bool = undefined;
+	var o_state = arguments.FlagState.NotEncountered;
+	var p_state = arguments.FlagState.NotEncountered;
 
 	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
 
-	for (args[1..], 1..) |arg, i| {
+	for (args) |arg| {
 		self.clear();
 		output_to_file = false;
 
@@ -45,21 +47,30 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 			try self.macros.put(arg["-D".len..], "");
 		}
 		else if (a.eql(arg, "-p")) {
-			self.prefix = args[i + 1];
+			p_state = .ExpectingArg;
 		}
 		else if (a.eql(arg, "-o")) {
 			output_to_file = true;
-
-			var file = try std.fs.cwd().openFile(args[i + 1], .{ .mode = .write_only });
-			defer file.close();
-
-			var writer_buf: [1024]u8 = undefined;
-			var writer = file.writer(&writer_buf);
-
-			try self.validate_inputs(allocator);
-			try self.preprocess(allocator, &writer);
+			o_state = .ExpectingArg;
 		}
 		else {
+			if (o_state == .ExpectingArg) {
+				var file = try std.fs.cwd().openFile(arg, .{ .mode = .write_only });
+				defer file.close();
+
+				var writer_buf: [1024]u8 = undefined;
+				var writer = file.writer(&writer_buf);
+
+				try self.validate_inputs(allocator);
+				try self.preprocess(allocator, &writer);
+				continue;
+			}
+			if (p_state == .ExpectingArg) {
+				self.prefix = arg;
+				p_state = .ArgEncountered;
+				continue;
+			}
+
 			// Input file
 			try self.inputs.append(allocator, arg);
 		}
@@ -67,7 +78,6 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 
 	if (output_to_file) return;
 	try self.validate_inputs(allocator);
-	
 	try self.preprocess(allocator, &a.stdout);
 }
 
@@ -127,11 +137,16 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 	try writer.interface.flush();
 }
 
+// TODO NOW CONSIDER moving it into arguments.zig
 fn validate_inputs(self: *Self, allocator: Allocator) !void {
 	for (self.inputs.items) |input| {
+		std.debug.print("TODO opening input {s}\n", .{input});
 		var awaiting_end = false;
 
-		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
+		var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
+			a.errln("Could not open input file '{s}'!", .{input});
+			return M5Error.BadArgs;
+		};
 		defer file.close();
 
 		var reader_buf: [1024]u8 = undefined;
@@ -150,7 +165,11 @@ fn validate_inputs(self: *Self, allocator: Allocator) !void {
 			
 			if (!a.startswith(line, self.prefix)) continue;
 
-			const line_wo_prefix = a.trimleft(line[self.prefix.len..], " \t");
+			const line_wo_prefix = blk: {
+				const wo_leading_whitespace = a.trimleft(line, " \t");
+				const prefix_skipped = wo_leading_whitespace[self.prefix.len..];
+				break :blk a.trimleft(prefix_skipped, " \t");
+			};
 			if (a.startswith(line_wo_prefix, "if")) {
 				awaiting_end = true;
 

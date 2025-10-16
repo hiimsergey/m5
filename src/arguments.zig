@@ -1,6 +1,11 @@
 const std = @import("std");
 const a = @import("alias.zig");
 
+pub const FlagState = enum(u8) {
+	NotEncountered,
+	ExpectingArg,
+	ArgEncountered
+};
 const M5Error = @import("error.zig").M5Error;
 
 pub fn validate(args: [][:0]u8) !void {
@@ -11,37 +16,12 @@ pub fn validate(args: [][:0]u8) !void {
 	}
 
 	var inputs_encountered = false;
-	var prefix_encountered = false;
+
+	var o_state = FlagState.NotEncountered;
+	var p_state = FlagState.NotEncountered;
 
 	for (args[1..], 1..) |arg, i| {
-		if (a.eql(arg, "-p")) {
-			if (prefix_encountered) {
-				a.errln(
-					\\Invalid args! Trying to pass a second -p flag.
-					\\See 'm5 -h' for correct usage.
-					, .{}
-				);
-				return M5Error.BadArgs;
-			}
-			if (i == args.len - 1) {
-				a.errln(
-					\\Invalid args! No prefix after -p flag.
-					\\See 'm5 -h' for correct usage.
-					, .{}
-				);
-				return M5Error.BadArgs;
-			}
-			if (args[i + 1][0] == '-') {
-				a.errln(
-					\\Invalid args! -p flag can't be followed by another flag.
-					\\See 'm5 -h' for correct usage.
-					, .{}
-				);
-				return M5Error.BadArgs;
-			}
-			prefix_encountered = true;
-		}
-		else if (a.eql(arg, "-o")) {
+		if (a.eql(arg, "-o")) {
 			if (!inputs_encountered) {
 				a.errln(
 					\\Invalid args! -o flag has no preceeding inputs!
@@ -66,6 +46,34 @@ pub fn validate(args: [][:0]u8) !void {
 				);
 				return M5Error.BadArgs;
 			}
+			o_state = .ExpectingArg;
+		}
+		else if (a.eql(arg, "-p")) {
+			if (p_state != .NotEncountered) {
+				a.errln(
+					\\Invalid args! Trying to pass a second -p flag.
+					\\See 'm5 -h' for correct usage.
+					, .{}
+				);
+				return M5Error.BadArgs;
+			}
+			if (i == args.len - 1) {
+				a.errln(
+					\\Invalid args! No prefix after -p flag.
+					\\See 'm5 -h' for correct usage.
+					, .{}
+				);
+				return M5Error.BadArgs;
+			}
+			if (args[i + 1][0] == '-') {
+				a.errln(
+					\\Invalid args! -p flag can't be followed by another flag.
+					\\See 'm5 -h' for correct usage.
+					, .{}
+				);
+				return M5Error.BadArgs;
+			}
+			p_state = .ExpectingArg;
 		}
 		else if (a.startswith(arg, "-D")) {
 			if (arg.len == "-D".len) {
@@ -88,11 +96,17 @@ pub fn validate(args: [][:0]u8) !void {
 			return M5Error.BadArgs;
 		}
 		else {
+			if (o_state == .ExpectingArg) {
+				o_state = .ArgEncountered;
+				continue;
+			}
+			if (p_state == .ExpectingArg) {
+				p_state = .ArgEncountered;
+				continue;
+			}
+
 			_ = std.fs.cwd().statFile(arg) catch {
-				a.errln(
-					\\Could not open input file '{s}'!
-					, .{arg}
-				);
+				a.errln("Could not open input file '{s}'!", .{arg});
 				return M5Error.BadArgs;
 			};
 			inputs_encountered = true;

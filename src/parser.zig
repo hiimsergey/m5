@@ -132,13 +132,17 @@ pub fn validate(condition: []const u8) !void {
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8))
-M5Error!bool {
+pub fn parse(
+	condition: []const u8,
+	macros: *const StringHashMap([]const u8)
+) M5Error!bool {
 	return parse_or(condition, macros);
 }
 
-fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8))
-M5Error!bool {
+fn parse_or(
+	condition: []const u8,
+	macros: *const StringHashMap([]const u8)
+) M5Error!bool {
 	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
 
@@ -150,8 +154,10 @@ M5Error!bool {
 	return result;
 }
 
-fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8))
-M5Error!bool {
+fn parse_and(
+	condition: []const u8,
+	macros: *const StringHashMap([]const u8)
+) M5Error!bool {
 	var result = true;
 	var iter = ConditionSplit.init(condition, '&');
 
@@ -163,8 +169,10 @@ M5Error!bool {
 	return result;
 }
 
-fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8))
-M5Error!bool {
+fn parse_cmp(
+	condition: []const u8,
+	macros: *const StringHashMap([]const u8)
+) M5Error!bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
@@ -209,8 +217,11 @@ M5Error!bool {
 	return try parse_term(condition, macros);
 }
 
-fn parse_term(condition: []const u8, macros: *const StringHashMap([]const u8))
-M5Error!bool {
+// TODO this function should return strings
+fn parse_term(
+	condition: []const u8,
+	macros: *const StringHashMap([]const u8)
+) M5Error!bool {
 	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
 
 	const term = iter.next();
@@ -239,6 +250,7 @@ M5Error!bool {
 	return term_parse_result != 0;
 }
 
+// TODO FINAL FIX ALL tests
 test "Condition validation" {
 	try validate("a & b | c");
 	try validate("a & (b & c) | d | (a | (b & c))");
