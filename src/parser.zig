@@ -6,7 +6,12 @@ const expectEqual = std.testing.expectEqual;
 const StringHashMap = std.StringHashMap;
 const M5Error = @import("error.zig").M5Error;
 
-const State = enum(u8) {InExpression, InNumber, ExpectingExpression, ExpectingOperator};
+const ParseState = enum(u8) {
+	InExpression,
+	InNumber,
+	ExpectingExpression,
+	ExpectingOperator
+};
 
 // TODO FINAL write tests
 const ConditionSplit = struct {
@@ -55,50 +60,63 @@ const ConditionSplit = struct {
 	}
 };
 
-pub fn validate(condition: []const u8) !void {
+pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 	var indentation_level: usize = 0;
-	var state = State.ExpectingExpression;
+	var state = ParseState.ExpectingExpression;
+	var cur_numeric_literal: []const u8 = "";
 
-	var i: usize = 0;
+	var i: usize = 1; // We define it outside the loop so we can skip characters.
 	while (i < condition.len) : (i += 1) {
+		// TODO FINAL remove the extra scope between while and switch
 		switch (condition[i]) {
-			' ' => {
-				if (state == .InExpression) state = .ExpectingOperator;
+			' ' => switch (state) {
+				.InExpression => state = .ExpectingOperator,
+				.InNumber => {
+					state = .ExpectingOperator;
+
+					// TODO FINAL TEST
+					try check_overflow(cur_numeric_literal[0..i], input, linenr);
+					cur_numeric_literal = "";
+				},
+				else => continue
 			},
-			'(' => {
-				if (state == .InExpression or state == .ExpectingOperator)
-					return M5Error.InvalidConditionSyntax;
-				indentation_level += 1;
+			'(' => switch (state) {
+				.ExpectingExpression => indentation_level += 1,
+				else => return M5Error.InvalidConditionSyntax
 			},
 			')' => {
 				if (indentation_level == 0 or
-					state != .InExpression) return M5Error.InvalidConditionSyntax;
+					(state != .InExpression and state != .InNumber))
+						return M5Error.InvalidConditionSyntax;
+				if (state == .InNumber) {
+					try check_overflow(cur_numeric_literal, input, linenr);
+					cur_numeric_literal = "";
+				}
 				indentation_level -= 1;
+				state = .ExpectingOperator;
 			},
-			'0'...'9' => {
-				switch (state) {
-					.ExpectingExpression => state = .InNumber,
-					.InExpression, .InNumber => continue,
-					.ExpectingOperator => return M5Error.InvalidConditionSyntax
-				}
+			'-' => switch (state) {
+				.ExpectingExpression => state = .InNumber,
+				else => return M5Error.InvalidConditionSyntax
 			},
-			'a'...'z', 'A'...'Z', '_', '-' => {
-				switch (state) {
-					.InExpression => continue,
-					.ExpectingExpression => state = .InExpression,
-					.InNumber, .ExpectingOperator =>
-						return M5Error.InvalidConditionSyntax
-				}
+			'0'...'9' => switch (state) {
+				.ExpectingExpression => {
+					state = .InNumber;
+					cur_numeric_literal = condition[i..];
+				},
+				.InExpression, .InNumber => continue,
+				.ExpectingOperator => return M5Error.InvalidConditionSyntax
 			},
-			'&', '|', '=' => {
-				switch (state) {
-					.ExpectingExpression => return M5Error.InvalidConditionSyntax,
-					.InExpression, .InNumber => {
-						if (indentation_level > 0) return M5Error.InvalidConditionSyntax;
-						state = .ExpectingExpression;
-					},
-					.ExpectingOperator => state = .ExpectingExpression
-				}
+			'a'...'z', 'A'...'Z', '_' => switch (state) {
+				.InExpression => continue,
+				.ExpectingExpression => state = .InExpression,
+				.InNumber, .ExpectingOperator =>
+					return M5Error.InvalidConditionSyntax
+			},
+			'&', '|', '=' => switch (state) {
+				.ExpectingExpression => return M5Error.InvalidConditionSyntax,
+				.InExpression, .InNumber => state = .ExpectingExpression,
+				.ExpectingOperator => state = .ExpectingExpression
 			},
 			'<', '>' => {
 				switch (state) {
@@ -109,136 +127,110 @@ pub fn validate(condition: []const u8) !void {
 					},
 					.ExpectingOperator => state = .ExpectingExpression
 				}
-				// TODO FIX no bounds checking
-				if (condition[i + 1] == '=') i += 1;
+				if (i == condition.len - 1 and condition[i + 1] == '=') i += 1;
 			},
-			'!' => {
-				// TODO FIX no bounds checking
-				if (condition[i + 1] != '=') return M5Error.InvalidConditionSyntax;
-				i += 1;
-				switch (state) {
-					.ExpectingExpression => return M5Error.InvalidConditionSyntax,
-					.InExpression, .InNumber => {
-						if (indentation_level > 0) return M5Error.InvalidConditionSyntax;
-						state = .ExpectingExpression;
-					},
-					.ExpectingOperator => state = .ExpectingExpression
+			'!' => switch (state) {
+				.ExpectingExpression => continue,
+				.InExpression, .InNumber => return M5Error.InvalidConditionSyntax,
+				.ExpectingOperator => {
+					if (i == condition.len - 1 or condition[i + 1] != '=') {
+						a.errln(
+							"{s}: line {d}: Expected operator, found '!' !",
+							.{input, linenr}
+						);
+						return M5Error.InvalidConditionSyntax;
+					}
+					i += 1;
+					state = .ExpectingExpression;
 				}
 			},
 			else => return M5Error.InvalidConditionSyntax
 		}
 	}
 
-	// TODO handle variable negations: !A
-	// TODO check for error.Overflow in numbers
-
 	if (indentation_level > 0 or (state != .InExpression and state != .InNumber))
 		return M5Error.InvalidConditionSyntax;
 }
 
-pub fn parse(
-	condition: []const u8,
-	macros: *const StringHashMap([]const u8)
-) M5Error!bool {
+pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	return parse_or(condition, macros);
 }
 
-fn parse_or(
-	condition: []const u8,
-	macros: *const StringHashMap([]const u8)
-) M5Error!bool {
+fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
 
 	while (iter.next()) |slice| {
-		const parse_result = if (slice[0] == '(') try parse(slice[1..], macros)
-			else try parse_and(slice, macros);
+		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
+			else parse_and(slice, macros);
 		result = result or parse_result;
 	}
 	return result;
 }
 
-fn parse_and(
-	condition: []const u8,
-	macros: *const StringHashMap([]const u8)
-) M5Error!bool {
+fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	var result = true;
 	var iter = ConditionSplit.init(condition, '&');
 
 	while (iter.next()) |slice| {
-		const parse_result = if (slice[0] == '(') try parse(slice[1..], macros)
-			else try parse_cmp(slice, macros);
+		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
+			else parse_cmp(slice, macros);
 		result = result and parse_result;
 	}
 	return result;
 }
 
-fn parse_cmp(
-	condition: []const u8,
-	macros: *const StringHashMap([]const u8)
-) M5Error!bool {
+fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = a.parse(try term_value(condition[0..i], macros)) catch 1;
+				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parse(try term_value(condition[i + 2..], macros))
-						catch 0;
+					const rhs = a.parse(term_value(condition[i + 2..], macros)) catch 1;
 					return lhs >= rhs;
 				}
-				const rhs = a.parse(try term_value(condition[i + 1..], macros))
-					catch 0;
+				const rhs = a.parse(term_value(condition[i + 1..], macros)) catch 1;
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = a.parse(try term_value(condition[0..i], macros)) catch 1;
+				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parse(try term_value(condition[i + 2..], macros))
-						catch 0;
+					const rhs = a.parse(term_value(condition[i + 2..], macros)) catch 1;
 					return lhs <= rhs;
 				}
-				const rhs = a.parse(try term_value(condition[i + 1..], macros))
-					catch 0;
+				const rhs = a.parse(term_value(condition[i + 1..], macros)) catch 1;
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = a.parse(try term_value(condition[0..i], macros)) catch 1;
-				const rhs = a.parse(try term_value(condition[i + 1..], macros)) catch 1;
+				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
+				const rhs = a.parse(term_value(condition[i + 1..], macros)) catch 1;
 				return lhs == rhs;
 			},
-			'!' => switch (condition[i + 1]) {
-				' ' => return M5Error.InvalidConditionSyntax,
-				'=' => {
-					const lhs = a.parse(try term_value(condition[0..i], macros))
-						catch 0;
-					const rhs = a.parse(try term_value(condition[i + 2..], macros))
-						catch 0;
-					return lhs != rhs;
-				},
-				else => continue
+			'!' => {
+				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
+				const rhs = a.parse(term_value(condition[i + 2..], macros)) catch 1;
+				return lhs != rhs;
 			},
 			else => continue
 		}
 	}
-	const value = try term_value(condition, macros);
+	const value = term_value(condition, macros);
 	const numeric_value = a.parse(value) catch 1;
 	return numeric_value > 0;
 }
 
-fn term_value(
-	term: []const u8,
-	macros: *const StringHashMap([]const u8)
-) M5Error![]const u8 {
-	if (term[0] != '!') {
-		if (is_number(term)) return term;
-		return macros.get(term) orelse "0";
-	}
+fn term_value(term: []const u8, macros: *const StringHashMap([]const u8)) []const u8 {
+	const trimmed = a.trimleft(term, "!");
+	const negate: bool = (term.len - trimmed.len) & 1 == 1;
 
-	const rest = term[1..];
-	const literal_value = a.parse(rest) catch {
-		const macro_value = macros.get(rest) orelse return "";
+	const tmp_result = if (is_number(trimmed)) trimmed
+		else macros.get(trimmed) orelse "0";
+	if (!negate) return tmp_result;
+
+	const literal_value = a.parse(trimmed) catch {
+		const macro_value = macros.get(trimmed) orelse return "";
 		const macro_literal_value = a.parse(macro_value) catch
 			return "0";
 		return switch (macro_literal_value) {
@@ -262,6 +254,21 @@ fn is_number(buf: []const u8) bool {
 	return true;
 }
 
+/// Return `M5Error.InvalidConditionSyntax` if `buf` couldn't be
+/// parsed into a i32.
+/// `input` and `linenr` are just information about the string's position
+/// for a more helpful error message.
+fn check_overflow(buf: []const u8, input: []const u8, linenr: usize) !void {
+	_ = a.parse(buf) catch {
+		a.errln(
+			"{s}: line {d}: " ++
+			"The absolute value of {s} is too big to represent!",
+			.{input, linenr, buf}
+		);
+		return M5Error.InvalidConditionSyntax;
+	};
+}
+
 // TODO FINAL FIX ALL tests
 test "Condition validation" {
 	try validate("a & b | c");
@@ -278,7 +285,7 @@ test "Condition validation" {
 }
 
 test "Condition parsing: Literals" {
-	try expectEqual(try parse("5 > 2 & 1 & 0"), false);
+	try expectEqual(parse("5 > 2 & 1 & 0"), false);
 	try expectEqual("!FOO", true);
 }
 
@@ -289,13 +296,13 @@ test "Condition parsing: Logic chains" {
 	try map.put("A", 1);
 	try map.put("B", 1);
 	try map.put("C", 0);
-	try expectEqual(try parse("A & B | C"), true);
+	try expectEqual(parse("A & B | C"), true);
 
 	map.clearRetainingCapacity();
 	try map.put("A", 1);
 	try map.put("B", 1);
 	try map.put("C", 0);
-	try expectEqual(try parse("A | B & C"), true);
+	try expectEqual(parse("A | B & C"), true);
 }
 
 test "Condition parsing: AND" {
@@ -305,7 +312,7 @@ test "Condition parsing: AND" {
 	try map.put("A", 1);
 	try map.put("B", 1);
 	try map.put("C", 0);
-	try expectEqual(try parse("A & B & C"), false);
+	try expectEqual(parse("A & B & C"), false);
 }
 
 test "Condition parsing: OR" {
@@ -315,19 +322,19 @@ test "Condition parsing: OR" {
 	try map.put("FOO", 1);
 	try map.put("BAR", 0);
 	try map.put("BAZ", 0);
-	try expectEqual(try parse("FOO | BAR | BAZ"), true);
+	try expectEqual(parse("FOO | BAR | BAZ"), true);
 
 	map.clearRetainingCapacity();
 	try map.put("FOO", 0);
 	try map.put("BAR", 1);
 	try map.put("BAZ", 0);
-	try expectEqual(try parse("FOO | BAR | BAZ"), true);
+	try expectEqual(parse("FOO | BAR | BAZ"), true);
 
 	map.clearRetainingCapacity();
 	try map.put("FOO", 0);
 	try map.put("BAR", 0);
 	try map.put("BAZ", 1);
-	try expectEqual(try parse("FOO | BAR | BAZ"), true);
+	try expectEqual(parse("FOO | BAR | BAZ"), true);
 }
 
 test "Condition parsing: Comparing" {
@@ -336,5 +343,5 @@ test "Condition parsing: Comparing" {
 
 	try map.put("A", 1);
 	try map.put("B", 0);
-	try expectEqual(try parse("A != B"), true);
+	try expectEqual(parse("A != B"), true);
 }

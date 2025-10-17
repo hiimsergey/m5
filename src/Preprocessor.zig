@@ -99,10 +99,12 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 
 	var expecting_block_end = false;
 
+	var linenr: usize = 1;
 	while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null)
 	|_| : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(1); // skip newline
+		linenr += 1;
 	}) {
 		const line = allocating.written();
 		if (!a.startswith(line, self.prefix)) continue;
@@ -115,12 +117,12 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 		if (a.startswith(line_wo_prefix, "if")) {
 			expecting_block_end = true;
 			const condition = line_wo_prefix["if".len..];
-			try parser.validate(condition);
+			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "elif")) {
 			if (!expecting_block_end) return M5Error.InvalidKeywordSyntax;
 			const condition = line_wo_prefix["elif".len..];
-			try parser.validate(condition);
+			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "end")) {
 			if (!expecting_block_end) return M5Error.InvalidKeywordSyntax;
@@ -162,7 +164,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 			inline for (.{"if", "elif"}) |keyword| {
 				if (a.startswith(line_wo_prefix, keyword)) {
 					const condition = line_wo_prefix[keyword.len..];
-					write_line = try parser.parse(condition, &self.macros);
+					write_line = parser.parse(condition, &self.macros);
 					continue :lines;
 				}
 			}
