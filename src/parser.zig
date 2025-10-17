@@ -1,4 +1,5 @@
 const std = @import("std");
+const a = @import("alias.zig");
 const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
 
@@ -108,9 +109,11 @@ pub fn validate(condition: []const u8) !void {
 					},
 					.ExpectingOperator => state = .ExpectingExpression
 				}
+				// TODO FIX no bounds checking
 				if (condition[i + 1] == '=') i += 1;
 			},
 			'!' => {
+				// TODO FIX no bounds checking
 				if (condition[i + 1] != '=') return M5Error.InvalidConditionSyntax;
 				i += 1;
 				switch (state) {
@@ -127,6 +130,7 @@ pub fn validate(condition: []const u8) !void {
 	}
 
 	// TODO handle variable negations: !A
+	// TODO check for error.Overflow in numbers
 
 	if (indentation_level > 0 or (state != .InExpression and state != .InNumber))
 		return M5Error.InvalidConditionSyntax;
@@ -176,78 +180,85 @@ fn parse_cmp(
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = try parse_term(condition[0..i], macros);
+				const lhs = a.parse(try term_value(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = try parse_term(condition[i + 2..], macros);
-					return lhs or !rhs;
+					const rhs = a.parse(try term_value(condition[i + 2..], macros))
+						catch 0;
+					return lhs >= rhs;
 				}
-				const rhs = try parse_term(condition[i + 1..], macros);
-				return lhs and !rhs;
+				const rhs = a.parse(try term_value(condition[i + 1..], macros))
+					catch 0;
+				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = try parse_term(condition[0..i], macros);
+				const lhs = a.parse(try term_value(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = try parse_term(condition[i + 2..], macros);
-					return !lhs or rhs;
+					const rhs = a.parse(try term_value(condition[i + 2..], macros))
+						catch 0;
+					return lhs <= rhs;
 				}
-				const rhs = try parse_term(condition[i + 1..], macros);
-				return !lhs and rhs;
+				const rhs = a.parse(try term_value(condition[i + 1..], macros))
+					catch 0;
+				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = try parse_term(condition[0..i], macros);
-				const rhs = try parse_term(condition[i + 1..], macros);
+				const lhs = a.parse(try term_value(condition[0..i], macros)) catch 1;
+				const rhs = a.parse(try term_value(condition[i + 1..], macros)) catch 1;
 				return lhs == rhs;
 			},
-			'!' => {
-				switch (condition[i + 1]) {
-					' ' => return M5Error.InvalidConditionSyntax,
-					'=' => {
-						const lhs = try parse_term(condition[0..i], macros);
-						const rhs = try parse_term(condition[i + 2..], macros);
-						return lhs != rhs;
-					},
-					else => continue
-				}
+			'!' => switch (condition[i + 1]) {
+				' ' => return M5Error.InvalidConditionSyntax,
+				'=' => {
+					const lhs = a.parse(try term_value(condition[0..i], macros))
+						catch 0;
+					const rhs = a.parse(try term_value(condition[i + 2..], macros))
+						catch 0;
+					return lhs != rhs;
+				},
+				else => continue
 			},
 			else => continue
 		}
 	}
-	return try parse_term(condition, macros);
+	const value = try term_value(condition, macros);
+	const numeric_value = a.parse(value) catch 1;
+	return numeric_value > 0;
 }
 
 // TODO this function should return strings
-fn parse_term(
-	condition: []const u8,
+fn term_value(
+	term: []const u8,
 	macros: *const StringHashMap([]const u8)
-) M5Error!bool {
-	var iter = std.mem.tokenizeScalar(u8, condition, ' ');
+) M5Error![]const u8 {
+	if (term[0] != '!') {
+		if (is_number(term)) return term;
+		return macros.get(term) orelse "0";
+	}
 
-	const term = iter.next();
-	if (term == null) return M5Error.InvalidConditionSyntax;
-
-	const it2 = iter.next();
-	if (it2 != null) return M5Error.InvalidConditionSyntax;
-
-	const term_parse_result = std.fmt.parseInt(i32, term.?, 10) catch |err_term| {
-		if (err_term == error.Overflow) return M5Error.System;
-		if (term.?[0] != '!') return macros.get(term.?) != null;
-
-		const rest = term.?[1..];
-		const rest_parse_result = std.fmt.parseInt(i32, rest, 10) catch |err_rest| {
-			if (err_rest == error.Overflow) return M5Error.System;
-
-			const value = macros.get(term.?[1..]) orelse return true;
-			const value_parse_result = std.fmt.parseInt(i32, value, 10) catch |err_val| {
-				if (err_val == error.Overflow) return M5Error.System;
-				return false;
-			};
-			return value_parse_result == 0;
+	const rest = term[1..];
+	const literal_value = a.parse(rest) catch {
+		const macro_value = macros.get(rest) orelse return "";
+		const macro_literal_value = a.parse(macro_value) catch
+			return "0";
+		return switch (macro_literal_value) {
+			0 => "",
+			else => "0"
 		};
-		return rest_parse_result == 0;
 	};
-	return term_parse_result != 0;
+	return switch (literal_value) {
+		0 => "",
+		else => "0"
+	};
+}
+
+fn is_number(buf: []const u8) bool {
+	for (buf) |c| switch (c) {
+		'0'...'9', '_' => continue,
+		else => return false
+	};
+	return true;
 }
 
 // TODO FINAL FIX ALL tests
@@ -256,7 +267,7 @@ test "Condition validation" {
 	try validate("a & (b & c) | d | (a | (b & c))");
 	try validate("(((b)))");
 	try validate("a < 5");
-	try validate("a < b < c");
+	try validate("a < b < c"); // (0|1) < c
 	try validate("a != b");
 
 	const ics = M5Error.InvalidConditionSyntax;

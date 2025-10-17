@@ -27,5 +27,5 @@ pub fn main() u8 {
 }
 
 // TODO FINAL COMMENT ALL
-// TODO DEBUG "m5 foo -p bar" implicitly returns 1
 // TODO FINAL CHECK if verbose works
+// TODO "m5 -p foo bar.zig" just returns 0

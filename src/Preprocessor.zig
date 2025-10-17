@@ -171,6 +171,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 				continue;
 			}
 
+			// TODO NOW CONSIDER writing invalid keyword itself
 			a.errln(
 				"{s}: line {d}: Invalid keyword! Should be 'if', 'elif' or 'end'",
 				.{input, linenr}

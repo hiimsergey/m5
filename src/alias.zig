@@ -15,6 +15,9 @@ pub fn eql(a: []const u8, b: []const u8) bool {
 pub fn startswith(a: []const u8, b: []const u8) bool {
 	return std.mem.startsWith(u8, a, b);
 }
+pub fn parse(buf: []const u8) !i32 {
+	return std.fmt.parseInt(i32, buf, 10);
+}
 pub fn trimleft(slice: []const u8, values_to_strip: []const u8) []const u8 {
 	return std.mem.trimLeft(u8, slice, values_to_strip);
 }
@@ -24,7 +27,7 @@ pub fn flush() void {
 }
 pub fn print_help() void {
 	println(
-		\\m5 – a simplified text file preprocessor
+		\\m5 – a simple text file preprocessor
 		\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
 		\\v0.0.0  GPL-3.0
 		\\
