@@ -27,5 +27,4 @@ pub fn main() u8 {
 }
 
 // TODO FINAL COMMENT ALL
-// TODO FINAL CHECK if verbose works
 // TODO "m5 -p foo bar.zig" just returns 0

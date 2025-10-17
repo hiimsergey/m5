@@ -4,21 +4,21 @@ const arguments = @import("arguments.zig");
 const parser = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 const File = std.fs.File;
 const M5Error = @import("error.zig").M5Error;
 const StringHashMap = std.StringHashMap;
-const StringList = std.ArrayList([]const u8);
 
 const Self = @This();
 
-inputs: StringList,
+inputs: ArrayList([]const u8),
 macros: StringHashMap([]const u8),
 prefix: []const u8,
 verbose: bool,
 
 pub fn init(allocator: Allocator) !Self {
 	return .{
-		.inputs = try StringList.initCapacity(allocator, 2),
+		.inputs = try ArrayList([]const u8).initCapacity(allocator, 2),
 		.macros = StringHashMap([]const u8).init(allocator),
 		.prefix = "",
 		.verbose = false
@@ -75,7 +75,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 			}
 
 			// Input file
-			try self.validate_input(allocator, arg); // TODO NOW IMPLEMENT
+			try self.validate_input(allocator, arg);
 			try self.inputs.append(allocator, arg);
 		}
 	}
@@ -171,14 +171,21 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 				continue;
 			}
 
-			// TODO NOW CONSIDER writing invalid keyword itself
+			// TODO FINAL TEST
+			const first_word = blk: {
+				const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
+					orelse line_wo_prefix.len;
+				break :blk line_wo_prefix[0..space_i];
+			};
 			a.errln(
-				"{s}: line {d}: Invalid keyword! Should be 'if', 'elif' or 'end'",
-				.{input, linenr}
+				\\{s}: line {d}: Invalid keyword '{s}'!
+				\\Should be 'if', 'elif' or 'end'"
+				, .{input, linenr, first_word}
 			);
 			return M5Error.InvalidKeywordSyntax;
 		}
 
+		// TODO FINAL TEST
 		if (self.verbose) a.println("Preprocessed {s}!\n", .{input});
 	}
 

@@ -227,7 +227,6 @@ fn parse_cmp(
 	return numeric_value > 0;
 }
 
-// TODO this function should return strings
 fn term_value(
 	term: []const u8,
 	macros: *const StringHashMap([]const u8)
@@ -253,6 +252,8 @@ fn term_value(
 	};
 }
 
+/// Return whether the given string could be successfully parsed into a number.
+/// Ignores underscore characters, just like `std.fmt.parseInt` does.
 fn is_number(buf: []const u8) bool {
 	for (buf) |c| switch (c) {
 		'0'...'9', '_' => continue,
