@@ -36,7 +36,6 @@ fn clear(self: *Self) void {
 }
 
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
-	var output_to_file = false;
 	var expecting_output = false;
 	var expecting_prefix = false;
 
@@ -50,7 +49,6 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 			expecting_prefix = true;
 		}
 		else if (a.eql(arg, "-o")) {
-			output_to_file = true;
 			expecting_output = true;
 		}
 		else if (arg[0] == '-') continue // gotta be the -v flag
@@ -64,13 +62,12 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 
 				try self.preprocess(allocator, &writer);
 				self.clear();
-				output_to_file = false;
 				expecting_output = false;
-				expecting_prefix = false;
 				continue;
 			}
 			if (expecting_prefix) {
 				self.prefix = arg;
+				expecting_prefix = false;
 				continue;
 			}
 
@@ -80,8 +77,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		}
 	}
 
-	if (output_to_file) return;
-	try self.preprocess(allocator, &a.stdout);
+	if (self.inputs.items.len > 0) try self.preprocess(allocator, &a.stdout);
 }
 
 fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {

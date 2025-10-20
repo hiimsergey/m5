@@ -22,7 +22,6 @@ pub fn main() u8 {
 	defer pp.deinit(allocator);
 
 	pp.run(allocator, args) catch return 1;
-
 	return 0;
 }
 
