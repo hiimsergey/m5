@@ -7,10 +7,10 @@ const StringHashMap = std.StringHashMap;
 const M5Error = @import("error.zig").M5Error;
 
 const ParseState = enum(u8) {
-	InExpression,
-	InNumber,
-	ExpectingExpression,
-	ExpectingOperator
+	in_expression,
+	in_number,
+	expecting_expression,
+	expecting_operator
 };
 
 // TODO FINAL write tests
@@ -62,7 +62,7 @@ const ConditionSplit = struct {
 
 pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 	var indentation_level: usize = 0;
-	var state = ParseState.ExpectingExpression;
+	var state = ParseState.expecting_expression;
 	var cur_numeric_literal: []const u8 = "";
 
 	var i: usize = 1; // We define it outside the loop so we can skip characters.
@@ -70,9 +70,9 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 		// TODO FINAL remove the extra scope between while and switch
 		switch (condition[i]) {
 			' ' => switch (state) {
-				.InExpression => state = .ExpectingOperator,
-				.InNumber => {
-					state = .ExpectingOperator;
+				.in_expression => state = .expecting_operator,
+				.in_number => {
+					state = .expecting_operator;
 
 					// TODO FINAL TEST
 					try check_overflow(cur_numeric_literal[0..i], input, linenr);
@@ -81,58 +81,58 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				else => continue
 			},
 			'(' => switch (state) {
-				.ExpectingExpression => indentation_level += 1,
+				.expecting_expression => indentation_level += 1,
 				else => return M5Error.InvalidConditionSyntax
 			},
 			')' => {
 				if (indentation_level == 0 or
-					(state != .InExpression and state != .InNumber))
+					(state != .in_expression and state != .in_number))
 						return M5Error.InvalidConditionSyntax;
-				if (state == .InNumber) {
+				if (state == .in_number) {
 					try check_overflow(cur_numeric_literal, input, linenr);
 					cur_numeric_literal = "";
 				}
 				indentation_level -= 1;
-				state = .ExpectingOperator;
+				state = .expecting_operator;
 			},
 			'-' => switch (state) {
-				.ExpectingExpression => state = .InNumber,
+				.expecting_expression => state = .in_number,
 				else => return M5Error.InvalidConditionSyntax
 			},
 			'0'...'9' => switch (state) {
-				.ExpectingExpression => {
-					state = .InNumber;
+				.expecting_expression => {
+					state = .in_number;
 					cur_numeric_literal = condition[i..];
 				},
-				.InExpression, .InNumber => continue,
-				.ExpectingOperator => return M5Error.InvalidConditionSyntax
+				.in_expression, .in_number => continue,
+				.expecting_operator => return M5Error.InvalidConditionSyntax
 			},
 			'a'...'z', 'A'...'Z', '_' => switch (state) {
-				.InExpression => continue,
-				.ExpectingExpression => state = .InExpression,
-				.InNumber, .ExpectingOperator =>
+				.in_expression => continue,
+				.expecting_expression => state = .in_expression,
+				.in_number, .expecting_operator =>
 					return M5Error.InvalidConditionSyntax
 			},
 			'&', '|', '=' => switch (state) {
-				.ExpectingExpression => return M5Error.InvalidConditionSyntax,
-				.InExpression, .InNumber => state = .ExpectingExpression,
-				.ExpectingOperator => state = .ExpectingExpression
+				.expecting_expression => return M5Error.InvalidConditionSyntax,
+				.in_expression, .in_number => state = .expecting_expression,
+				.expecting_operator => state = .expecting_expression
 			},
 			'<', '>' => {
 				switch (state) {
-					.ExpectingExpression => return M5Error.InvalidConditionSyntax,
-					.InExpression, .InNumber => {
+					.expecting_expression => return M5Error.InvalidConditionSyntax,
+					.in_expression, .in_number => {
 						if (indentation_level > 0) return M5Error.InvalidConditionSyntax;
-						state = .ExpectingExpression;
+						state = .expecting_expression;
 					},
-					.ExpectingOperator => state = .ExpectingExpression
+					.expecting_operator => state = .expecting_expression
 				}
 				if (i == condition.len - 1 and condition[i + 1] == '=') i += 1;
 			},
 			'!' => switch (state) {
-				.ExpectingExpression => continue,
-				.InExpression, .InNumber => return M5Error.InvalidConditionSyntax,
-				.ExpectingOperator => {
+				.expecting_expression => continue,
+				.in_expression, .in_number => return M5Error.InvalidConditionSyntax,
+				.expecting_operator => {
 					if (i == condition.len - 1 or condition[i + 1] != '=') {
 						a.errln(
 							"{s}: line {d}: Expected operator, found '!' !",
@@ -141,14 +141,14 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 						return M5Error.InvalidConditionSyntax;
 					}
 					i += 1;
-					state = .ExpectingExpression;
+					state = .expecting_expression;
 				}
 			},
 			else => return M5Error.InvalidConditionSyntax
 		}
 	}
 
-	if (indentation_level > 0 or (state != .InExpression and state != .InNumber))
+	if (indentation_level > 0 or (state != .in_expression and state != .in_number))
 		return M5Error.InvalidConditionSyntax;
 }
 

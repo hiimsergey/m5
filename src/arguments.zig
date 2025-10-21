@@ -2,9 +2,9 @@ const std = @import("std");
 const a = @import("alias.zig");
 
 pub const FlagState = enum(u8) {
-	NotEncountered,
-	ExpectingArg,
-	ArgEncountered
+	not_encountered,
+	expecting_arg,
+	arg_encountered
 };
 const M5Error = @import("error.zig").M5Error;
 
@@ -17,8 +17,8 @@ pub fn validate(args: [][:0]u8) !void {
 
 	var inputs_encountered = false;
 
-	var o_state = FlagState.NotEncountered;
-	var p_state = FlagState.NotEncountered;
+	var o_state = FlagState.not_encountered;
+	var p_state = FlagState.not_encountered;
 
 	for (args[1..], 1..) |arg, i| {
 		if (a.eql(arg, "-o")) {
@@ -46,10 +46,10 @@ pub fn validate(args: [][:0]u8) !void {
 				);
 				return M5Error.BadArgs;
 			}
-			o_state = .ExpectingArg;
+			o_state = .expecting_arg;
 		}
 		else if (a.eql(arg, "-p")) {
-			if (p_state != .NotEncountered) {
+			if (p_state != .not_encountered) {
 				a.errln(
 					\\Invalid args! Trying to pass a second -p flag.
 					\\See 'm5 -h' for correct usage.
@@ -73,7 +73,7 @@ pub fn validate(args: [][:0]u8) !void {
 				);
 				return M5Error.BadArgs;
 			}
-			p_state = .ExpectingArg;
+			p_state = .expecting_arg;
 		}
 		else if (a.startswith(arg, "-D")) {
 			if (arg.len == "-D".len) {
@@ -96,12 +96,12 @@ pub fn validate(args: [][:0]u8) !void {
 			return M5Error.BadArgs;
 		}
 		else {
-			if (o_state == .ExpectingArg) {
-				o_state = .ArgEncountered;
+			if (o_state == .expecting_arg) {
+				o_state = .arg_encountered;
 				continue;
 			}
-			if (p_state == .ExpectingArg) {
-				p_state = .ArgEncountered;
+			if (p_state == .expecting_arg) {
+				p_state = .arg_encountered;
 				continue;
 			}
 

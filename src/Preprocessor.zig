@@ -36,8 +36,8 @@ fn clear(self: *Self) void {
 }
 
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
-	var expecting_output = false;
-	var expecting_prefix = false;
+	const ExpectationStatus = enum(u8) {none, output, prefix};
+	var expecting = ExpectationStatus.none;
 
 	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
 
@@ -46,14 +46,14 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 			try self.macros.put(arg["-D".len..], "");
 		}
 		else if (a.eql(arg, "-p")) {
-			expecting_prefix = true;
+			expecting = .prefix;
 		}
 		else if (a.eql(arg, "-o")) {
-			expecting_output = true;
+			expecting = .output;
 		}
 		else if (arg[0] == '-') continue // gotta be the -v flag
 		else {
-			if (expecting_output) {
+			if (expecting == .output) {
 				var file = try std.fs.cwd().openFile(arg, .{ .mode = .write_only });
 				defer file.close();
 
@@ -62,12 +62,12 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 
 				try self.preprocess(allocator, &writer);
 				self.clear();
-				expecting_output = false;
+				expecting = .none;
 				continue;
 			}
-			if (expecting_prefix) {
+			if (expecting == .refix) {
 				self.prefix = arg;
-				expecting_prefix = false;
+				expecting = .none;
 				continue;
 			}
 
