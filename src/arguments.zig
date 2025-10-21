@@ -12,7 +12,7 @@ pub fn validate(args: [][:0]u8) !void {
 	if (args.len < 2 or a.contains_str(args, "--help") or a.contains_str(args, "-h")) {
 		a.print_help();
 		a.flush();
-		return error.Help;
+		return M5Error.Help;
 	}
 
 	var inputs_encountered = false;
@@ -76,7 +76,8 @@ pub fn validate(args: [][:0]u8) !void {
 			p_state = .expecting_arg;
 		}
 		else if (a.startswith(arg, "-D")) {
-			if (arg.len == "-D".len) {
+			const definition = arg["-D".len..];
+			if (definition.len == 0) {
 				a.errln(
 					\\Invalid args! -D flag must follow a macro name with an optional value.
 					\\See 'm5 -h' for correct usage.
@@ -84,11 +85,22 @@ pub fn validate(args: [][:0]u8) !void {
 				);
 				return M5Error.BadArgs;
 			}
+			switch (definition[0]) {
+				'-', '0'...'9' => {
+					a.errln(
+						\\Invalid args! You can't define a macro starting with a dash or a number!
+						\\See 'm5 -h' for correct usage.
+						, .{}
+					);
+					return M5Error.BadArgs;
+				},
+				else => {}
+			}
 		}
 		else if (a.eql(arg, "-v")) continue
 		else if (arg[0] == '-') {
 			a.errln(
-				\\Invalid args! Non-existent flag given, i.e. one that's none out of thse:
+				\\Invalid args! Non-existent flag given, i.e. one that's none out of these:
 				\\  -D, -h, -o, -p, -v
 				\\See 'm5 -h' for correct usage.
 				, .{}

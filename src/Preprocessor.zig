@@ -43,7 +43,18 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 
 	for (args[1..]) |arg| {
 		if (a.startswith(arg, "-D")) {
-			try self.macros.put(arg["-D".len..], "");
+			const Pair = struct { key: []const u8, value: []const u8 };
+
+			const definition = arg["-D".len..];
+			const pair: Pair = blk: {
+				const equals_i = std.mem.indexOfScalar(u8, definition, '=') orelse
+					break :blk .{ .key = definition, .value = "" };
+				break :blk .{
+					.key = definition[0..equals_i],
+					.value = definition[equals_i + 1..]
+				};
+			};
+			try self.macros.put(pair.key, pair.value);
 		}
 		else if (a.eql(arg, "-p")) {
 			expecting = .prefix;
