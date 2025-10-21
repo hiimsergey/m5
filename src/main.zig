@@ -10,7 +10,6 @@ const Preprocessor = @import("Preprocessor.zig");
 pub fn main() u8 {
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
-
 	const allocator = aw.allocator();
 
 	const args = std.process.argsAlloc(allocator) catch return 1;
@@ -25,6 +24,17 @@ pub fn main() u8 {
 	return 0;
 }
 
+// TODO DEBUG "m5 -p m5 /tmp/alice -DALICE 2>/dev/null -o /tmp/alice.out" returns 1
+// TODO NOW i think m5 appends instead of overwriting
+// TODO NOW i think if-elif-end doesnt work at all rn
 // TODO FINAL COMMENT ALL
-// TODO IMPLEMENT -Dfoo=bar syntax
 // TODO "m5 -p m5 /tmp/alice -D ALICE -D BOB" just silently quits
+
+// TODO TEST PLAN
+// no end
+// too much end
+// ! operator
+// (a > b) == 1
+// if-elif-end
+// nested ifs
+// -o foo -o bar

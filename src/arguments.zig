@@ -8,15 +8,16 @@ pub const FlagState = enum(u8) {
 };
 const M5Error = @import("error.zig").M5Error;
 
+/// Check command line arguments for validity. That includes the correct argument syntax
+/// and the existence of the input files.
 pub fn validate(args: [][:0]u8) !void {
-	if (args.len < 2 or a.contains_str(args, "--help") or a.contains_str(args, "-h")) {
+	if (args.len == 1 or a.contains_str(args, "--help") or a.contains_str(args, "-h")) {
 		a.print_help();
 		a.flush();
 		return M5Error.Help;
 	}
 
 	var inputs_encountered = false;
-
 	var o_state = FlagState.not_encountered;
 	var p_state = FlagState.not_encountered;
 
@@ -109,6 +110,7 @@ pub fn validate(args: [][:0]u8) !void {
 		}
 		else {
 			if (o_state == .expecting_arg) {
+				inputs_encountered = false;
 				o_state = .arg_encountered;
 				continue;
 			}
@@ -121,6 +123,7 @@ pub fn validate(args: [][:0]u8) !void {
 				a.errln("Could not open input file '{s}'!", .{arg});
 				return M5Error.BadArgs;
 			};
+			// TOOD NOW CONSIDER MOVE validate_input() here
 			inputs_encountered = true;
 		}
 	}

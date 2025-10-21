@@ -30,15 +30,15 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 	self.macros.deinit();
 }
 
-fn clear(self: *Self) void {
-	self.inputs.clearRetainingCapacity();
-	self.macros.clearRetainingCapacity();
-}
-
+/// Interpret arguments, assuming they have a correct format, and preprocess
+/// all input files into their respective outputs.
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
-	const ExpectationStatus = enum(u8) {none, output, prefix};
-	var expecting = ExpectationStatus.none;
+	// Token messaging what kind of argument is expected next
+	const ExpectationStatus = enum(u8) {nothing, output, prefix};
+	var expecting = ExpectationStatus.nothing;
 
+	// Don't log anything if preprocessing to stdout to avoid mixing with the file
+	// content.
 	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
 
 	for (args[1..]) |arg| {
@@ -56,12 +56,8 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 			};
 			try self.macros.put(pair.key, pair.value);
 		}
-		else if (a.eql(arg, "-p")) {
-			expecting = .prefix;
-		}
-		else if (a.eql(arg, "-o")) {
-			expecting = .output;
-		}
+		else if (a.eql(arg, "-p")) expecting = .prefix
+		else if (a.eql(arg, "-o")) expecting = .output
 		else if (arg[0] == '-') continue // gotta be the -v flag
 		else {
 			if (expecting == .output) {
@@ -72,13 +68,13 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 				var writer = file.writer(&writer_buf);
 
 				try self.preprocess(allocator, &writer);
-				self.clear();
-				expecting = .none;
+				self.inputs.clearRetainingCapacity();
+				expecting = .nothing;
 				continue;
 			}
 			if (expecting == .prefix) {
 				self.prefix = arg;
-				expecting = .none;
+				expecting = .nothing;
 				continue;
 			}
 
@@ -91,6 +87,8 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	if (self.inputs.items.len > 0) try self.preprocess(allocator, &a.stdout);
 }
 
+/// TODO NOW CONSIDER
+/// Check whether the input file lacks any m5 syntax errors.
 fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
 		a.errln("Could not open input file '{s}'!", .{input});
