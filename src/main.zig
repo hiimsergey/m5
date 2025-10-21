@@ -26,4 +26,5 @@ pub fn main() u8 {
 }
 
 // TODO FINAL COMMENT ALL
-// TODO "m5 -p foo bar.zig" just returns 0
+// TODO IMPLEMENT -Dfoo=bar syntax
+// TODO "m5 -p m5 /tmp/alice -D ALICE -D BOB" just silently quits

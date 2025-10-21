@@ -65,7 +65,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 				expecting = .none;
 				continue;
 			}
-			if (expecting == .refix) {
+			if (expecting == .prefix) {
 				self.prefix = arg;
 				expecting = .none;
 				continue;
