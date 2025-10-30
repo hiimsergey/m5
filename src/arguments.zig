@@ -13,7 +13,6 @@ const M5Error = @import("error.zig").M5Error;
 pub fn validate(args: [][:0]u8) !void {
 	if (args.len == 1 or a.contains_str(args, "--help") or a.contains_str(args, "-h")) {
 		a.print_help();
-		a.flush();
 		return M5Error.Help;
 	}
 

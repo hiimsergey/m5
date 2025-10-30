@@ -35,6 +35,8 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	// Token messaging what kind of argument is expected next
 	const ExpectationStatus = enum(u8) {nothing, output, prefix};
+	const Pair = struct { key: []const u8, value: []const u8 };
+
 	var expecting = ExpectationStatus.nothing;
 
 	// Don't log anything if preprocessing to stdout to avoid mixing with the file
@@ -43,8 +45,6 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 
 	for (args[1..]) |arg| {
 		if (a.startswith(arg, "-D")) {
-			const Pair = struct { key: []const u8, value: []const u8 };
-
 			const definition = arg["-D".len..];
 			const pair: Pair = blk: {
 				const equals_i = std.mem.indexOfScalar(u8, definition, '=') orelse
@@ -61,7 +61,10 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		else if (arg[0] == '-') continue // gotta be the -v flag
 		else {
 			if (expecting == .output) {
-				var file = try std.fs.cwd().openFile(arg, .{ .mode = .write_only });
+				var file = std.fs.cwd().createFile(arg, .{}) catch {
+					a.errln("Could not create output file '{s}'!", .{arg});
+					return M5Error.System;
+				};
 				defer file.close();
 
 				var writer_buf: [1024]u8 = undefined;

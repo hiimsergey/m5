@@ -12,6 +12,8 @@ pub fn main() u8 {
 	defer aw.deinit();
 	const allocator = aw.allocator();
 
+	defer a.flush();
+
 	const args = std.process.argsAlloc(allocator) catch return 1;
 	defer std.process.argsFree(allocator, args);
 
@@ -24,8 +26,6 @@ pub fn main() u8 {
 	return 0;
 }
 
-// TODO DEBUG "m5 -p m5 /tmp/alice -DALICE 2>/dev/null -o /tmp/alice.out" returns 1
-// TODO NOW i think m5 appends instead of overwriting
 // TODO NOW i think if-elif-end doesnt work at all rn
 // TODO FINAL COMMENT ALL
 // TODO "m5 -p m5 /tmp/alice -D ALICE -D BOB" just silently quits
