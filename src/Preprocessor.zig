@@ -90,7 +90,6 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	if (self.inputs.items.len > 0) try self.preprocess(allocator, &a.stdout);
 }
 
-/// TODO NOW CONSIDER
 /// Check whether the input file lacks any m5 syntax errors.
 fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
@@ -108,8 +107,7 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var expecting_block_end = false;
 
 	var linenr: usize = 1;
-	while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null)
-	|_| : ({
+	while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(1); // skip newline
 		linenr += 1;
@@ -140,7 +138,9 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 }
 
 fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
-	var write_line = true;
+	const WriteLine = enum(u8) {no, yes, ignore};
+
+	var write_line = WriteLine.yes;
 
 	for (self.inputs.items) |input| {
 		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
@@ -152,6 +152,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 		var allocating = std.Io.Writer.Allocating.init(allocator);
 		defer allocating.deinit();
 
+		// TODO NOW MOVE this to a recursive function to handle nested blocks
 		var linenr: usize = 1;
 		lines: while (
 			reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
@@ -164,21 +165,33 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 			const trimmed: []const u8 = a.trimleft(line, " \t");
 
 			if (!a.startswith(trimmed, self.prefix)) {
-				if (write_line) try writer.interface.print("{s}\n", .{line});
-				continue;
+				if (write_line == .yes) try writer.interface.print("{s}\n", .{line});
+				continue :lines;
 			}
 
 			const line_wo_prefix = a.trimleft(trimmed[self.prefix.len..], " \t");
-			inline for (.{"if", "elif"}) |keyword| {
-				if (a.startswith(line_wo_prefix, keyword)) {
-					const condition = line_wo_prefix[keyword.len..];
-					write_line = parser.parse(condition, &self.macros);
-					continue :lines;
-				}
+			if (a.startswith(line_wo_prefix, "if")) {
+				const condition = line_wo_prefix["if".len..];
+				write_line = switch (parser.parse(condition, &self.macros)) {
+					true => .yes,
+					false => .no
+				};
+				continue :lines;
+			}
+			if (a.startswith(line_wo_prefix, "elif")) {
+				const condition = line_wo_prefix["elif".len..];
+				write_line = switch (write_line) {
+					.no => switch (parser.parse(condition, &self.macros)) {
+						true => .yes,
+						false => .no
+					},
+					else => .ignore
+				};
+				continue :lines;
 			}
 			if (a.startswith(line_wo_prefix, "end")) {
-				write_line = true;
-				continue;
+				write_line = .yes;
+				continue :lines;
 			}
 
 			// TODO FINAL TEST
@@ -196,7 +209,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 		}
 
 		// TODO FINAL TEST
-		if (self.verbose) a.println("Preprocessed {s}!\n", .{input});
+		if (self.verbose) a.println("Preprocessed {s}!", .{input});
 	}
 
 	try writer.interface.flush();

@@ -26,15 +26,16 @@ pub fn main() u8 {
 	return 0;
 }
 
-// TODO NOW i think if-elif-end doesnt work at all rn
+// TODO NOW IMPLEMENT nestes ifs
 // TODO FINAL COMMENT ALL
-// TODO "m5 -p m5 /tmp/alice -D ALICE -D BOB" just silently quits
+// TODO FINAL ADD input from piping
 
 // TODO TEST PLAN
+// nested ifs
 // no end
 // too much end
 // ! operator
 // (a > b) == 1
 // if-elif-end
-// nested ifs
 // -o foo -o bar
+// syntax error (with linenr)

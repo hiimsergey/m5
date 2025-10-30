@@ -153,12 +153,10 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 }
 
 pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
-	std.debug.print("TODO parse '{s}'\n", .{condition});
 	return parse_or(condition, macros);
 }
 
 fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
-	std.debug.print("TODO parse_or '{s}'\n", .{condition});
 	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
 
@@ -171,7 +169,6 @@ fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) boo
 }
 
 fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
-	std.debug.print("TODO parse_and '{s}'\n", .{condition});
 	var result = true;
 	var iter = ConditionSplit.init(condition, '&');
 
@@ -184,7 +181,6 @@ fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) bo
 }
 
 fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
-	std.debug.print("TODO parse_cmp '{s}'\n", .{condition});
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
@@ -230,7 +226,6 @@ fn term_value(term: []const u8, macros: *const StringHashMap([]const u8)) []cons
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
-	std.debug.print("TODO term_value '{s}'\n", .{trimmed});
 
 	const tmp_result = if (is_number(trimmed)) trimmed
 		else macros.get(trimmed) orelse "0";
