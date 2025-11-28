@@ -27,7 +27,7 @@ pub fn flush() void {
 }
 pub fn print_help() void {
 	println(
-		\\m5 – a simple text file preprocessor
+		\\m5 - a simple text file preprocessor
 		\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
 		\\v0.0.0  GPL-3.0
 		\\

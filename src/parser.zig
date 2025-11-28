@@ -159,7 +159,7 @@ pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bo
 fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
-
+	
 	while (iter.next()) |slice| {
 		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
 			else parse_and(slice, macros);

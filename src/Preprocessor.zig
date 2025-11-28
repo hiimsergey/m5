@@ -3,11 +3,15 @@ const a = @import("alias.zig");
 const arguments = @import("arguments.zig");
 const parser = @import("parser.zig");
 
+const Allocating = std.Io.Writer.Allocating;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const File = std.fs.File;
 const M5Error = @import("error.zig").M5Error;
 const StringHashMap = std.StringHashMap;
+
+
+const WriteLine = enum(u8) {no, yes, ignore};
 
 const Self = @This();
 
@@ -101,7 +105,7 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var reader_buf: [1024]u8 = undefined;
 	var reader = file.reader(&reader_buf);
 
-	var allocating = std.Io.Writer.Allocating.init(allocator);
+	var allocating = Allocating.init(allocator);
 	defer allocating.deinit();
 
 	var expecting_block_end = false;
@@ -138,10 +142,6 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 }
 
 fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
-	const WriteLine = enum(u8) {no, yes, ignore};
-
-	var write_line = WriteLine.yes;
-
 	for (self.inputs.items) |input| {
 		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
 		defer file.close();
@@ -149,68 +149,94 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 		var reader_buf: [1024]u8 = undefined;
 		var reader = file.reader(&reader_buf);
 
-		var allocating = std.Io.Writer.Allocating.init(allocator);
+		var allocating = Allocating.init(allocator);
 		defer allocating.deinit();
 
-		// TODO NOW MOVE this to a recursive function to handle nested blocks
 		var linenr: usize = 1;
-		lines: while (
-			reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
-		) |_| : ({
-			allocating.clearRetainingCapacity();
-			reader.interface.toss(1); // skip newline
-			linenr += 1;
-		}) {
-			const line: []u8 = allocating.written();
-			const trimmed: []const u8 = a.trimleft(line, " \t");
-
-			if (!a.startswith(trimmed, self.prefix)) {
-				if (write_line == .yes) try writer.interface.print("{s}\n", .{line});
-				continue :lines;
-			}
-
-			const line_wo_prefix = a.trimleft(trimmed[self.prefix.len..], " \t");
-			if (a.startswith(line_wo_prefix, "if")) {
-				const condition = line_wo_prefix["if".len..];
-				write_line = switch (parser.parse(condition, &self.macros)) {
-					true => .yes,
-					false => .no
-				};
-				continue :lines;
-			}
-			if (a.startswith(line_wo_prefix, "elif")) {
-				const condition = line_wo_prefix["elif".len..];
-				write_line = switch (write_line) {
-					.no => switch (parser.parse(condition, &self.macros)) {
-						true => .yes,
-						false => .no
-					},
-					else => .ignore
-				};
-				continue :lines;
-			}
-			if (a.startswith(line_wo_prefix, "end")) {
-				write_line = .yes;
-				continue :lines;
-			}
-
-			// TODO FINAL TEST
-			const first_word = blk: {
-				const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
-					orelse line_wo_prefix.len;
-				break :blk line_wo_prefix[0..space_i];
-			};
-			a.errln(
-				\\{s}: line {d}: Invalid keyword '{s}'!
-				\\Should be 'if', 'elif' or 'end'"
-				, .{input, linenr, first_word}
-			);
-			return M5Error.InvalidKeywordSyntax;
-		}
+		try self.read_lines(input, &allocating, &reader, writer, .yes, &linenr);
 
 		// TODO FINAL TEST
 		if (self.verbose) a.println("Preprocessed {s}!", .{input});
 	}
-
 	try writer.interface.flush();
+}
+
+fn read_lines(
+	self: *Self,
+	input: []const u8, allocating: *Allocating,
+	reader: *File.Reader, writer: *File.Writer,
+	wl: WriteLine, linenr: *usize
+) !void {
+	var write_line: WriteLine = wl;
+
+	while (
+		reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
+	) |_| : ({
+		allocating.clearRetainingCapacity();
+		reader.interface.toss(1); // skip newline
+		linenr.* += 1;
+	}) {
+		const line: []u8 = allocating.written();
+		const trimmed: []const u8 = a.trimleft(line, " \t");
+
+		if (!a.startswith(trimmed, self.prefix)) {
+			if (write_line == .yes) try writer.interface.print("{s}\n", .{line});
+			continue;
+		}
+
+		const line_wo_prefix = a.trimleft(trimmed[self.prefix.len..], " \t");
+		if (a.startswith(line_wo_prefix, "if")) {
+			const condition = line_wo_prefix["if".len..];
+			// TODO NOW
+			// handle case where coming from another if
+			//
+			// wl parse
+			// ignore _ -> ignore
+			// false ignore
+			// false false
+			// false true
+			// true ignore
+			// true false
+			// true true
+			const new_write_line: WriteLine = switch (
+				parser.parse(condition, &self.macros
+			)) {
+				true => .yes,
+				false => .no
+			};
+			try self.read_lines(input, allocating, reader, writer, new_write_line, linenr);
+		}
+		// TODO NOW
+		// this should fail if there was no if, right?
+		if (a.startswith(line_wo_prefix, "elif")) {
+			const condition = line_wo_prefix["elif".len..];
+			write_line = switch (write_line) {
+				.no => switch (parser.parse(condition, &self.macros)) {
+					true => .yes,
+					false => .no
+				},
+				else => .ignore
+			};
+			continue;
+		}
+		// TODO NOW
+		// this function must change .ignore, does it?
+		if (a.startswith(line_wo_prefix, "end")) return;
+
+		// TODO FINAL TEST
+		const first_word = blk: {
+			const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
+				orelse line_wo_prefix.len;
+			break :blk line_wo_prefix[0..space_i];
+		};
+		a.errln(
+			\\{s}: line {d}: Invalid keyword '{s}'!
+			\\Should be 'if', 'elif' or 'end'"
+			, .{input, linenr.*, first_word}
+		);
+		return M5Error.InvalidKeywordSyntax;
+	}
+
+	a.errln("{s}: line {d}: If-clause lacks end keyword!", .{input, linenr.*});
+	return M5Error.InvalidKeywordSyntax;
 }
