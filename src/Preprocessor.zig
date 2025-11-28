@@ -108,9 +108,9 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var allocating = Allocating.init(allocator);
 	defer allocating.deinit();
 
-	var expecting_block_end = false;
+	var nesting: u32 = 0;
+	var linenr: u32 = 1;
 
-	var linenr: usize = 1;
 	while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(1); // skip newline
@@ -125,20 +125,38 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 			break :blk a.trimleft(prefix_skipped, " \t");
 		};
 		if (a.startswith(line_wo_prefix, "if")) {
-			expecting_block_end = true;
+			nesting += 1;
 			const condition = line_wo_prefix["if".len..];
 			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "elif")) {
-			if (!expecting_block_end) return M5Error.InvalidKeywordSyntax;
+			if (nesting == 0) return M5Error.InvalidBlockSyntax;
 			const condition = line_wo_prefix["elif".len..];
 			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "end")) {
-			if (!expecting_block_end) return M5Error.InvalidKeywordSyntax;
-			expecting_block_end = false;
+			if (nesting == 0) return M5Error.InvalidBlockSyntax;
+			nesting -= 1;
+		}
+		else {
+			// TODO FINAL TEST
+			const first_word = blk: {
+				const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
+					orelse line_wo_prefix.len;
+				break :blk line_wo_prefix[0..space_i];
+			};
+			a.errln(
+				\\{s}: line {d}: Invalid keyword '{s}'!
+				\\Should be 'if', 'elif' or 'end'"
+				, .{input, linenr, first_word}
+			);
+			return M5Error.InvalidKeywordSyntax;
 		}
 	}
+
+	if (nesting == 0) return;
+	a.errln("{s}: line {d}: If clause lacks end keyword!", .{input, linenr});
+	return M5Error.InvalidBlockSyntax;
 }
 
 fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
@@ -222,21 +240,9 @@ fn read_lines(
 		// TODO NOW
 		// this function must change .ignore, does it?
 		if (a.startswith(line_wo_prefix, "end")) return;
-
-		// TODO FINAL TEST
-		const first_word = blk: {
-			const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
-				orelse line_wo_prefix.len;
-			break :blk line_wo_prefix[0..space_i];
-		};
-		a.errln(
-			\\{s}: line {d}: Invalid keyword '{s}'!
-			\\Should be 'if', 'elif' or 'end'"
-			, .{input, linenr.*, first_word}
-		);
-		return M5Error.InvalidKeywordSyntax;
 	}
 
+	// TODO NOW MOVE validate_input
 	a.errln("{s}: line {d}: If-clause lacks end keyword!", .{input, linenr.*});
-	return M5Error.InvalidKeywordSyntax;
+	return M5Error.InvalidBlockSyntax;
 }
