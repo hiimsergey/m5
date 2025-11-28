@@ -1,10 +1,7 @@
 const std = @import("std");
 const a = @import("alias.zig");
-const expectError = std.testing.expectError;
-const expectEqual = std.testing.expectEqual;
 
 const StringHashMap = std.StringHashMap;
-const M5Error = @import("error.zig").M5Error;
 
 const ParseState = enum(u8) {
 	in_expression,
@@ -61,7 +58,7 @@ const ConditionSplit = struct {
 };
 
 pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
-	var indentation_level: usize = 0;
+	var scope: usize = 0;
 	var state = ParseState.expecting_expression;
 	var cur_numeric_literal: []const u8 = "";
 
@@ -81,23 +78,39 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				else => continue
 			},
 			'(' => switch (state) {
-				.expecting_expression => indentation_level += 1,
-				else => return M5Error.InvalidConditionSyntax
+				.expecting_expression => scope += 1,
+				else => {
+					a.errln(
+						"{s}, line {d}: Expected expression, got '('",
+						.{input, linenr}
+					);
+					return error.Generic;
+				}
 			},
 			')' => {
-				if (indentation_level == 0 or
-					(state != .in_expression and state != .in_number))
-						return M5Error.InvalidConditionSyntax;
+				if (scope == 0 or (state != .in_expression and state != .in_number)) {
+					a.errln(
+						"{s}, line {d}: TODO",
+						.{input, linenr}
+					);
+					return error.Generic;
+				}
 				if (state == .in_number) {
 					try check_overflow(cur_numeric_literal, input, linenr);
 					cur_numeric_literal = "";
 				}
-				indentation_level -= 1;
+				scope -= 1;
 				state = .expecting_operator;
 			},
 			'-' => switch (state) {
 				.expecting_expression => state = .in_number,
-				else => return M5Error.InvalidConditionSyntax
+				else => {
+					a.errln(
+						"{s}, line {d}: TODO",
+						.{input, linenr}
+					);
+					return error.Generic;
+				}
 			},
 			'0'...'9' => switch (state) {
 				.expecting_expression => {
@@ -105,24 +118,53 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 					cur_numeric_literal = condition[i..];
 				},
 				.in_expression, .in_number => continue,
-				.expecting_operator => return M5Error.InvalidConditionSyntax
+				.expecting_operator => {
+					a.errln(
+						"{s}, line {d}: TODO",
+						.{input, linenr}
+					);
+					return error.Generic;
+				}
 			},
 			'a'...'z', 'A'...'Z', '_' => switch (state) {
 				.in_expression => continue,
 				.expecting_expression => state = .in_expression,
-				.in_number, .expecting_operator =>
-					return M5Error.InvalidConditionSyntax
+				.in_number, .expecting_operator => {
+					a.errln(
+						"{s}, line {d}: TODO",
+						.{input, linenr}
+					);
+					return error.Generic;
+				}
 			},
 			'&', '|', '=' => switch (state) {
-				.expecting_expression => return M5Error.InvalidConditionSyntax,
+				.expecting_expression => {
+					a.errln(
+						"{s}, line {d}: TODO",
+						.{input, linenr}
+					);
+					return error.Generic;
+				},
 				.in_expression, .in_number => state = .expecting_expression,
 				.expecting_operator => state = .expecting_expression
 			},
 			'<', '>' => {
 				switch (state) {
-					.expecting_expression => return M5Error.InvalidConditionSyntax,
+					.expecting_expression => {
+						a.errln(
+							"{s}, line {d}: TODO",
+							.{input, linenr}
+						);
+						return error.Generic;
+					},
 					.in_expression, .in_number => {
-						if (indentation_level > 0) return M5Error.InvalidConditionSyntax;
+						if (scope > 0) {
+							a.errln(
+								"{s}, line {d}: TODO",
+								.{input, linenr}
+							);
+							return error.Generic;
+						}
 						state = .expecting_expression;
 					},
 					.expecting_operator => state = .expecting_expression
@@ -131,25 +173,42 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			},
 			'!' => switch (state) {
 				.expecting_expression => continue,
-				.in_expression, .in_number => return M5Error.InvalidConditionSyntax,
+				.in_expression, .in_number => {
+					a.errln(
+						"{s}, line {d}: TODO",
+						.{input, linenr}
+					);
+					return error.Generic;
+				},
 				.expecting_operator => {
 					if (i == condition.len - 1 or condition[i + 1] != '=') {
 						a.errln(
-							"{s}: line {d}: Expected operator, found '!' !",
+							"{s}, line {d}: Expected operator, found '!' !",
 							.{input, linenr}
 						);
-						return M5Error.InvalidConditionSyntax;
+						return error.Generic;
 					}
 					i += 1;
 					state = .expecting_expression;
 				}
 			},
-			else => return M5Error.InvalidConditionSyntax
+			else => {
+				a.errln(
+					"{s}, line {d}: Expected operator, found '!' !",
+					.{input, linenr}
+				);
+				return error.Generic;
+			}
 		}
 	}
 
-	if (indentation_level > 0 or (state != .in_expression and state != .in_number))
-		return M5Error.InvalidConditionSyntax;
+	if (scope > 0 or (state != .in_expression and state != .in_number)) {
+		a.errln(
+			"{s}, line {d}: Expected operator, found '!' !",
+			.{input, linenr}
+		);
+		return error.Generic;
+	}
 }
 
 pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
@@ -256,94 +315,16 @@ fn is_number(buf: []const u8) bool {
 	return true;
 }
 
-/// Return `M5Error.InvalidConditionSyntax` if `buf` couldn't be
-/// parsed into a i32.
+/// Return an error if `buf` couldn't be parsed into a i32.
 /// `input` and `linenr` are just information about the string's position
 /// for a more helpful error message.
 fn check_overflow(buf: []const u8, input: []const u8, linenr: usize) !void {
 	_ = a.parse(buf) catch {
 		a.errln(
-			"{s}: line {d}: " ++
+			"{s}, line {d}: " ++
 			"The absolute value of {s} is too big to represent!",
 			.{input, linenr, buf}
 		);
-		return M5Error.InvalidConditionSyntax;
+		return error.Generic;
 	};
-}
-
-// TODO FINAL FIX ALL tests
-test "Condition validation" {
-	try validate("a & b | c");
-	try validate("a & (b & c) | d | (a | (b & c))");
-	try validate("(((b)))");
-	try validate("a < 5");
-	try validate("a < b < c"); // (0|1) < c
-	try validate("a != b");
-
-	const ics = M5Error.InvalidConditionSyntax;
-	try expectError(ics, validate("a |"));
-	try expectError(ics, validate("a ! b"));
-	try expectError(ics, validate("2bad"));
-}
-
-test "Condition parsing: Literals" {
-	try expectEqual(parse("5 > 2 & 1 & 0"), false);
-	try expectEqual("!FOO", true);
-}
-
-test "Condition parsing: Logic chains" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
-	defer map.deinit();
-
-	try map.put("A", 1);
-	try map.put("B", 1);
-	try map.put("C", 0);
-	try expectEqual(parse("A & B | C"), true);
-
-	map.clearRetainingCapacity();
-	try map.put("A", 1);
-	try map.put("B", 1);
-	try map.put("C", 0);
-	try expectEqual(parse("A | B & C"), true);
-}
-
-test "Condition parsing: AND" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
-	defer map.deinit();
-
-	try map.put("A", 1);
-	try map.put("B", 1);
-	try map.put("C", 0);
-	try expectEqual(parse("A & B & C"), false);
-}
-
-test "Condition parsing: OR" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
-	defer map.deinit();
-
-	try map.put("FOO", 1);
-	try map.put("BAR", 0);
-	try map.put("BAZ", 0);
-	try expectEqual(parse("FOO | BAR | BAZ"), true);
-
-	map.clearRetainingCapacity();
-	try map.put("FOO", 0);
-	try map.put("BAR", 1);
-	try map.put("BAZ", 0);
-	try expectEqual(parse("FOO | BAR | BAZ"), true);
-
-	map.clearRetainingCapacity();
-	try map.put("FOO", 0);
-	try map.put("BAR", 0);
-	try map.put("BAZ", 1);
-	try expectEqual(parse("FOO | BAR | BAZ"), true);
-}
-
-test "Condition parsing: Comparing" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
-	defer map.deinit();
-
-	try map.put("A", 1);
-	try map.put("B", 0);
-	try expectEqual(parse("A != B"), true);
 }

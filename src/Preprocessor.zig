@@ -7,10 +7,11 @@ const Allocating = std.Io.Writer.Allocating;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const File = std.fs.File;
-const M5Error = @import("error.zig").M5Error;
 const StringHashMap = std.StringHashMap;
 
-
+// Token messaging what kind of argument is expected next
+const ExpectationStatus = enum(u8) {nothing, output, prefix};
+const Pair = struct { key: []const u8, value: []const u8 };
 const WriteLine = enum(u8) {no, yes, ignore};
 
 const Self = @This();
@@ -37,10 +38,6 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 /// Interpret arguments, assuming they have a correct format, and preprocess
 /// all input files into their respective outputs.
 pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
-	// Token messaging what kind of argument is expected next
-	const ExpectationStatus = enum(u8) {nothing, output, prefix};
-	const Pair = struct { key: []const u8, value: []const u8 };
-
 	var expecting = ExpectationStatus.nothing;
 
 	// Don't log anything if preprocessing to stdout to avoid mixing with the file
@@ -67,7 +64,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 			if (expecting == .output) {
 				var file = std.fs.cwd().createFile(arg, .{}) catch {
 					a.errln("Could not create output file '{s}'!", .{arg});
-					return M5Error.System;
+					return error.Generic;
 				};
 				defer file.close();
 
@@ -98,7 +95,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
 		a.errln("Could not open input file '{s}'!", .{input});
-		return M5Error.BadArgs;
+		return error.Generic;
 	};
 	defer file.close();
 
@@ -108,14 +105,15 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var allocating = Allocating.init(allocator);
 	defer allocating.deinit();
 
-	var nesting: u32 = 0;
 	var linenr: u32 = 1;
+	var scope: u32 = 0;
 
-	while (reader.interface.streamDelimiter(&allocating.writer, '\n') catch null) |_| : ({
+	while (reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
 		allocating.clearRetainingCapacity();
-		reader.interface.toss(1); // skip newline
+		reader.interface.toss(@intFromBool(reader.interface.seek < reader.interface.end)); // skip newline
 		linenr += 1;
 	}) {
+		if (linenr == 13) std.process.exit(25);
 		const line = allocating.written();
 		if (!a.startswith(line, self.prefix)) continue;
 
@@ -125,18 +123,30 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 			break :blk a.trimleft(prefix_skipped, " \t");
 		};
 		if (a.startswith(line_wo_prefix, "if")) {
-			nesting += 1;
+			scope += 1;
 			const condition = line_wo_prefix["if".len..];
 			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "elif")) {
-			if (nesting == 0) return M5Error.InvalidBlockSyntax;
+			if (scope == 0) {
+				a.errln(
+					"{s}, line {d}: There can be no elif without an if clause prior!",
+					.{input, linenr}
+				);
+				return error.Generic;
+			}
 			const condition = line_wo_prefix["elif".len..];
 			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "end")) {
-			if (nesting == 0) return M5Error.InvalidBlockSyntax;
-			nesting -= 1;
+			if (scope == 0) {
+				a.errln(
+					"{s}, line {d}: There can be no end without an if clause prior!",
+					.{input, linenr}
+				);
+				return error.Generic;
+			}
+			scope -= 1;
 		}
 		else {
 			// TODO FINAL TEST
@@ -146,17 +156,17 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 				break :blk line_wo_prefix[0..space_i];
 			};
 			a.errln(
-				\\{s}: line {d}: Invalid keyword '{s}'!
+				\\{s}, line {d}: Invalid keyword '{s}'!
 				\\Should be 'if', 'elif' or 'end'"
 				, .{input, linenr, first_word}
 			);
-			return M5Error.InvalidKeywordSyntax;
+			return error.Generic;
 		}
 	}
 
-	if (nesting == 0) return;
-	a.errln("{s}: line {d}: If clause lacks end keyword!", .{input, linenr});
-	return M5Error.InvalidBlockSyntax;
+	if (scope == 0) return;
+	a.errln("{s}, line {d}: If clause lacks end keyword!", .{input, linenr});
+	return error.Generic;
 }
 
 fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
@@ -170,9 +180,7 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 		var allocating = Allocating.init(allocator);
 		defer allocating.deinit();
 
-		var linenr: usize = 1;
-		try self.read_lines(input, &allocating, &reader, writer, .yes, &linenr);
-
+		try self.read_lines(&allocating, &reader, writer);
 		// TODO FINAL TEST
 		if (self.verbose) a.println("Preprocessed {s}!", .{input});
 	}
@@ -180,19 +188,28 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 }
 
 fn read_lines(
-	self: *Self,
-	input: []const u8, allocating: *Allocating,
-	reader: *File.Reader, writer: *File.Writer,
-	wl: WriteLine, linenr: *usize
+	self: *Self, allocating: *Allocating,
+	reader: *File.Reader, writer: *File.Writer
 ) !void {
-	var write_line: WriteLine = wl;
+	// TODO NOTE PLAN
+	// when declaring a scope .ignore, count next scopes but wait until the
+	// outermost scope ends
+	// then set wl to .yes
+	//
+	// on elif
+	// if wl was ignore, keep it ignore
+	// otherwise recompute
+
+	var linenr: u32 = 1;
+	var scope: u32, var ignore_scopes: u32 = .{0, 0};
+	var write_line: WriteLine = .yes;
 
 	while (
 		reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
 	) |_| : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(1); // skip newline
-		linenr.* += 1;
+		linenr += 1;
 	}) {
 		const line: []u8 = allocating.written();
 		const trimmed: []const u8 = a.trimleft(line, " \t");
@@ -202,47 +219,29 @@ fn read_lines(
 			continue;
 		}
 
-		const line_wo_prefix = a.trimleft(trimmed[self.prefix.len..], " \t");
-		if (a.startswith(line_wo_prefix, "if")) {
-			const condition = line_wo_prefix["if".len..];
-			// TODO NOW
-			// handle case where coming from another if
-			//
-			// wl parse
-			// ignore _ -> ignore
-			// false ignore
-			// false false
-			// false true
-			// true ignore
-			// true false
-			// true true
-			const new_write_line: WriteLine = switch (
-				parser.parse(condition, &self.macros
-			)) {
+		const condition_line = a.trimleft(trimmed[self.prefix.len..], " \t");
+		if (a.startswith(condition_line, "if")) {
+			scope += 1;
+			if (write_line != .yes) {
+				ignore_scopes += 1;
+				continue;
+			}
+			write_line = switch (parser.parse(condition_line["if".len..], &self.macros)) {
 				true => .yes,
 				false => .no
 			};
-			try self.read_lines(input, allocating, reader, writer, new_write_line, linenr);
 		}
-		// TODO NOW
-		// this should fail if there was no if, right?
-		if (a.startswith(line_wo_prefix, "elif")) {
-			const condition = line_wo_prefix["elif".len..];
-			write_line = switch (write_line) {
-				.no => switch (parser.parse(condition, &self.macros)) {
+		else if (a.startswith(condition_line, "elif")) {
+			if (write_line != .yes) continue;
+			write_line = if (write_line != .no) .ignore
+				else switch (parser.parse(condition_line["elif".len..], &self.macros)) {
 					true => .yes,
 					false => .no
-				},
-				else => .ignore
-			};
-			continue;
+				};
 		}
-		// TODO NOW
-		// this function must change .ignore, does it?
-		if (a.startswith(line_wo_prefix, "end")) return;
+		else if (a.startswith(condition_line, "end")) {
+			if (ignore_scopes == 0) write_line = .yes
+			else ignore_scopes -= 1;
+		}
 	}
-
-	// TODO NOW MOVE validate_input
-	a.errln("{s}: line {d}: If-clause lacks end keyword!", .{input, linenr.*});
-	return M5Error.InvalidBlockSyntax;
 }
