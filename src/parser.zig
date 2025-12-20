@@ -122,11 +122,6 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 					}
 				}
 
-				// TODO NOW NOTE
-				// the parser should allow an arbitrary number of whitespace
-				// including tabs
-				// ) should hijack .expecting_operator
-
 				// TODO ADD test for \t characters
 				// TODO ADD test for too much whitespace
 				// TODO ADD test for mixed whitespace

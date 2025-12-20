@@ -33,16 +33,15 @@ fn real_main() !void {
 // TODO NOW remove all instances of allocating. ts is redundant
 // TODO FINAL COMMENT ALL
 // TODO FINAL CONSIDER replacing usize with u32 everywhere
-// TODO FINAL ADD input from piping
 // TODO FINAL REMOVE std.debug.print calls
 
-// TODO TEST PLAN
-// nested ifs
-// no end
-// too much end
-// ! operator
-// (a > b) == 1
-// if-elif-end
-// -o foo -o bar
-// syntax error (with linenr)
-// zig-out/bin/m5 -p m5 .zig-cache/tmp/fVS2W6qQrVVELE26/test.txt silently fails
+// TODO ADD tests:
+//     nested ifs
+//     no end
+//     too much end
+//     ! operator
+//     (a > b) == 1
+//     if-elif-end
+//     -o foo -o bar
+//     syntax error (with linenr)
+//     zig-out/bin/m5 -p m5 .zig-cache/tmp/fVS2W6qQrVVELE26/test.txt silently fails

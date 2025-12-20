@@ -13,7 +13,7 @@ const E = error.Generic;
 
 // Token messaging what kind of argument is expected next
 const ExpectationStatus = enum(u8) {nothing, output, prefix};
-const Pair = struct { key: []const u8, value: []const u8 };
+const KV = struct { key: []const u8, value: []const u8 };
 const WriteLine = enum(u8) {no, yes, ignore};
 
 const Self = @This();
@@ -49,7 +49,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	for (args[1..]) |arg| {
 		if (a.startswith(arg, "-D")) {
 			const definition = arg["-D".len..];
-			const pair: Pair = blk: {
+			const pair: KV = blk: {
 				const equals_i = std.mem.indexOfScalar(u8, definition, '=') orelse
 					break :blk .{ .key = definition, .value = "" };
 				break :blk .{
@@ -62,8 +62,8 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		else if (a.eql(arg, "-p")) expecting = .prefix
 		else if (a.eql(arg, "-o")) expecting = .output
 		else if (arg[0] == '-') continue // gotta be the -v flag
-		else {
-			if (expecting == .output) {
+		else switch (expecting) {
+			.output => {
 				var file = std.fs.cwd().createFile(arg, .{}) catch {
 					a.errtag();
 					a.errln("Could not create output file '{s}'!", .{arg});
@@ -78,16 +78,17 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 				self.inputs.clearRetainingCapacity();
 				expecting = .nothing;
 				continue;
-			}
-			if (expecting == .prefix) {
+			},
+			.prefix => {
 				self.prefix = arg;
 				expecting = .nothing;
 				continue;
+			},
+			else => {
+				// Input file
+				try self.validate_input(allocator, arg);
+				try self.inputs.append(allocator, arg);
 			}
-
-			// Input file
-			try self.validate_input(allocator, arg);
-			try self.inputs.append(allocator, arg);
 		}
 	}
 
@@ -109,8 +110,8 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var allocating = Allocating.init(allocator);
 	defer allocating.deinit();
 
-	var linenr: u32 = 1;
-	var scope: u32 = 0;
+	var linenr: usize = 1;
+	var scope: usize = 0;
 
 	while (reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
 		allocating.clearRetainingCapacity();
@@ -207,9 +208,9 @@ fn read_lines(
 	// if wl was ignore, keep it ignore
 	// otherwise recompute
 
-	var linenr: u32 = 1;
-	var scope: u32 = 0;
-	var ignore_scopes: u32 = 0;
+	var linenr: usize = 1;
+	var scope: usize = 0;
+	var ignore_scopes: usize = 0;
 	var write_line: WriteLine = .yes;
 
 	while (
