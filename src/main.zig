@@ -30,10 +30,11 @@ fn real_main() !void {
 	try pp.run(allocator, args);
 }
 
-// TODO NOW write errmsg if input doesnt exist
+// TODO NOW remove all instances of allocating. ts is redundant
 // TODO FINAL COMMENT ALL
 // TODO FINAL CONSIDER replacing usize with u32 everywhere
 // TODO FINAL ADD input from piping
+// TODO FINAL REMOVE std.debug.print calls
 
 // TODO TEST PLAN
 // nested ifs

@@ -17,7 +17,7 @@ pub fn eql(a: []const u8, b: []const u8) bool {
 pub fn startswith(a: []const u8, b: []const u8) bool {
 	return std.mem.startsWith(u8, a, b);
 }
-pub fn parse(buf: []const u8) !i32 {
+pub fn parsei(buf: []const u8) !i32 {
 	return std.fmt.parseInt(i32, buf, 10);
 }
 pub fn trimleft(slice: []const u8, values_to_strip: []const u8) []const u8 {
@@ -37,6 +37,7 @@ pub fn errln(comptime msg: []const u8, args: anytype) void {
 	_ = stderr.interface.write("\x1b[31merror: ") catch {};
 	stderr.interface.print(msg ++ "\n", args) catch {};
 }
+// TODO NOW this is a bad idea cause "error:" gets doubled
 pub fn err(comptime msg: []const u8) void {
 	_ = stderr.interface.write("\x1b[31merror: ") catch {};
 	stderr.interface.print(msg, .{}) catch {};
@@ -45,7 +46,7 @@ pub fn print_help() void {
 	println(
 		\\m5 - a simple text file preprocessor
 		\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-		\\v0.0.0  GPL-3.0
+		\\v0.1.0  GPL-3.0
 		\\
 		\\Usage:
 		\\    m5 (INPUTS | OPTION)...

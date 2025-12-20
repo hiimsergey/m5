@@ -3,6 +3,8 @@ const a = @import("alias.zig");
 
 const StringHashMap = std.StringHashMap;
 
+const E = error.Generic;
+
 const ParseState = enum(u8) {
 	in_expression,
 	in_number,
@@ -32,18 +34,19 @@ const ConditionSplit = struct {
 				return result;
 			}
 		}
+
 		const result = self.expression;
-		self.expression = &.{};
+		self.expression = "";
 		return result;
 	}
 
 	fn end_bracket(self: *ConditionSplit) []const u8 {
-		var depth: usize = 1;
+		var scope: usize = 1;
 		for (1..self.expression.len) |i| switch (self.expression[i]) {
-			'(' => depth += 1,
+			'(' => scope += 1,
 			')' => {
-				depth -= 1;
-				if (depth != 0) continue;
+				scope -= 1;
+				if (scope != 0) continue;
 
 				if (self.expression[i] == self.token or i == self.expression.len - 1) {
 					const result = self.expression[0..i];
@@ -57,16 +60,19 @@ const ConditionSplit = struct {
 	}
 };
 
+// TODO FINAL proper error messages instead of the same copy everywhere
 pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
+	std.debug.print("--- init\n", .{});
+
 	var scope: usize = 0;
 	var state = ParseState.expecting_expression;
 	var cur_numeric_literal: []const u8 = "";
 
-	var i: usize = 1; // We define it outside the loop so we can skip characters.
+	var i: usize = 0; // We define it outside the loop so we can skip characters.
 	while (i < condition.len) : (i += 1) {
 		// TODO FINAL remove the extra scope between while and switch
 		switch (condition[i]) {
-			' ' => switch (state) {
+			' ', '\t' => switch (state) {
 				.in_expression => state = .expecting_operator,
 				.in_number => {
 					state = .expecting_operator;
@@ -81,35 +87,56 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.expecting_expression => scope += 1,
 				else => {
 					a.errln(
-						"{s}, line {d}: Expected expression, got '('",
+						"{s}, line {d}: Expected expression, got '(' !",
 						.{input, linenr}
 					);
-					return error.Generic;
+					return E;
 				}
 			},
 			')' => {
-				if (scope == 0 or (state != .in_expression and state != .in_number)) {
+				//if (scope == 0 or (state != .in_expression and state != .in_number)) {
+				if (scope == 0) {
 					a.errln(
-						"{s}, line {d}: TODO",
+						"{s}, line {d}: Unexpected ')' without opening bracket!",
 						.{input, linenr}
 					);
-					return error.Generic;
+					return E;
 				}
-				if (state == .in_number) {
-					try check_overflow(cur_numeric_literal, input, linenr);
-					cur_numeric_literal = "";
+				switch (state) {
+					.expecting_expression => {
+						a.errln(
+							"{s}, line {d}: Expected expression, got ')' !",
+							.{input, linenr}
+						);
+						return E;
+					},
+					.in_number => {
+						try check_overflow(cur_numeric_literal, input, linenr);
+						cur_numeric_literal = "";
+					},
+					else => {
+						scope -= 1;
+						state = .expecting_operator;
+					}
 				}
-				scope -= 1;
-				state = .expecting_operator;
+
+				// TODO NOW NOTE
+				// the parser should allow an arbitrary number of whitespace
+				// including tabs
+				// ) should hijack .expecting_operator
+
+				// TODO ADD test for \t characters
+				// TODO ADD test for too much whitespace
+				// TODO ADD test for mixed whitespace
 			},
 			'-' => switch (state) {
 				.expecting_expression => state = .in_number,
 				else => {
 					a.errln(
-						"{s}, line {d}: TODO",
+						"{s}, line {d}: invalid character '-' !",
 						.{input, linenr}
 					);
-					return error.Generic;
+					return E;
 				}
 			},
 			'0'...'9' => switch (state) {
@@ -120,30 +147,49 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.in_expression, .in_number => continue,
 				.expecting_operator => {
 					a.errln(
-						"{s}, line {d}: TODO",
+						"{s}, line {d}: Expected operator, got number!",
 						.{input, linenr}
 					);
-					return error.Generic;
+					return E;
 				}
 			},
-			'a'...'z', 'A'...'Z', '_' => switch (state) {
+			'a'...'z', 'A'...'Z' => switch (state) {
 				.in_expression => continue,
 				.expecting_expression => state = .in_expression,
-				.in_number, .expecting_operator => {
+				.in_number => {
 					a.errln(
-						"{s}, line {d}: TODO",
+						"{s}, line {d}: Unexpected letter '{}' in number!",
+						.{input, linenr, condition[i]}
+					);
+					return E;
+				},
+				.expecting_operator => {
+					a.errln(
+						"{s}, line {d}: Expected operator, got '{}' !",
+						.{input, linenr, condition[i]}
+					);
+					return E;
+				}
+			},
+			'_' => switch (state) {
+				.in_expression, .in_number => continue,
+				.expecting_expression => state = .in_expression,
+				.expecting_operator => {
+					a.errln(
+						"{s}, line {d}: Expected operator, got '_' !",
 						.{input, linenr}
 					);
-					return error.Generic;
+					return E;
 				}
+				// TODO ADD test leading and trailing underscore in numbers
 			},
 			'&', '|', '=' => switch (state) {
 				.expecting_expression => {
 					a.errln(
-						"{s}, line {d}: TODO",
-						.{input, linenr}
+						"{s}, line {d}: Expected expression, got operator '{}' !",
+						.{input, linenr, condition[i]}
 					);
-					return error.Generic;
+					return E;
 				},
 				.in_expression, .in_number => state = .expecting_expression,
 				.expecting_operator => state = .expecting_expression
@@ -152,33 +198,35 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				switch (state) {
 					.expecting_expression => {
 						a.errln(
-							"{s}, line {d}: TODO",
-							.{input, linenr}
+							"{s}, line {d}: Expected expression, " ++
+							"got comparison operator '{}' !",
+							.{input, linenr, condition[i]}
 						);
-						return error.Generic;
+						return E;
 					},
 					.in_expression, .in_number => {
+						// TODO CONSIDER why did i write this?
 						if (scope > 0) {
 							a.errln(
-								"{s}, line {d}: TODO",
+								"{s}, line {d}: TODO!",
 								.{input, linenr}
 							);
-							return error.Generic;
+							return E;
 						}
 						state = .expecting_expression;
 					},
 					.expecting_operator => state = .expecting_expression
 				}
-				if (i == condition.len - 1 and condition[i + 1] == '=') i += 1;
+				if (i < condition.len - 1 and condition[i + 1] == '=') i += 1;
 			},
 			'!' => switch (state) {
 				.expecting_expression => continue,
 				.in_expression, .in_number => {
 					a.errln(
-						"{s}, line {d}: TODO",
+						"{s}, line {d}: Unexpected '!' in number!",
 						.{input, linenr}
 					);
-					return error.Generic;
+					return E;
 				},
 				.expecting_operator => {
 					if (i == condition.len - 1 or condition[i + 1] != '=') {
@@ -186,7 +234,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 							"{s}, line {d}: Expected operator, found '!' !",
 							.{input, linenr}
 						);
-						return error.Generic;
+						return E;
 					}
 					i += 1;
 					state = .expecting_expression;
@@ -197,17 +245,20 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 					"{s}, line {d}: Expected operator, found '!' !",
 					.{input, linenr}
 				);
-				return error.Generic;
+				return E;
 			}
 		}
+		std.debug.print("char: '{c}' state: {s}\n", .{condition[i], @tagName(state)});
 	}
 
-	if (scope > 0 or (state != .in_expression and state != .in_number)) {
+	// TODO NOW in order for trailing ) to work
+	//if (scope > 0 or (state != .in_expression and state != .in_number)) {
+	if (scope > 0 or state == .expecting_expression) {
 		a.errln(
 			"{s}, line {d}: Expected operator, found '!' !",
 			.{input, linenr}
 		);
-		return error.Generic;
+		return E;
 	}
 }
 
@@ -243,40 +294,40 @@ fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) bo
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
+				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parse(term_value(condition[i + 2..], macros)) catch 1;
+					const rhs = a.parsei(term_value(condition[i + 2..], macros)) catch 1;
 					return lhs >= rhs;
 				}
-				const rhs = a.parse(term_value(condition[i + 1..], macros)) catch 1;
+				const rhs = a.parsei(term_value(condition[i + 1..], macros)) catch 1;
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
+				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parse(term_value(condition[i + 2..], macros)) catch 1;
+					const rhs = a.parsei(term_value(condition[i + 2..], macros)) catch 1;
 					return lhs <= rhs;
 				}
-				const rhs = a.parse(term_value(condition[i + 1..], macros)) catch 1;
+				const rhs = a.parsei(term_value(condition[i + 1..], macros)) catch 1;
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
-				const rhs = a.parse(term_value(condition[i + 1..], macros)) catch 1;
+				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
+				const rhs = a.parsei(term_value(condition[i + 1..], macros)) catch 1;
 				return lhs == rhs;
 			},
 			'!' => {
-				const lhs = a.parse(term_value(condition[0..i], macros)) catch 1;
-				const rhs = a.parse(term_value(condition[i + 2..], macros)) catch 1;
+				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
+				const rhs = a.parsei(term_value(condition[i + 2..], macros)) catch 1;
 				return lhs != rhs;
 			},
 			else => continue
 		}
 	}
 	const value = term_value(condition, macros);
-	const numeric_value = a.parse(value) catch 1;
+	const numeric_value = a.parsei(value) catch 1;
 	return numeric_value > 0;
 }
 
@@ -290,9 +341,9 @@ fn term_value(term: []const u8, macros: *const StringHashMap([]const u8)) []cons
 		else macros.get(trimmed) orelse "0";
 	if (!negate) return tmp_result;
 
-	const literal_value = a.parse(trimmed) catch {
+	const literal_value = a.parsei(trimmed) catch {
 		const macro_value = macros.get(trimmed) orelse return "";
-		const macro_literal_value = a.parse(macro_value) catch
+		const macro_literal_value = a.parsei(macro_value) catch
 			return "0";
 		return switch (macro_literal_value) {
 			0 => "",
@@ -319,12 +370,12 @@ fn is_number(buf: []const u8) bool {
 /// `input` and `linenr` are just information about the string's position
 /// for a more helpful error message.
 fn check_overflow(buf: []const u8, input: []const u8, linenr: usize) !void {
-	_ = a.parse(buf) catch {
+	_ = a.parsei(buf) catch {
 		a.errln(
 			"{s}, line {d}: " ++
 			"The absolute value of {s} is too big to represent!",
 			.{input, linenr, buf}
 		);
-		return error.Generic;
+		return E;
 	};
 }

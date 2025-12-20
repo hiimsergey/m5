@@ -113,7 +113,6 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 		reader.interface.toss(@intFromBool(reader.interface.seek < reader.interface.end)); // skip newline
 		linenr += 1;
 	}) {
-		if (linenr == 13) std.process.exit(25);
 		const line = allocating.written();
 		if (!a.startswith(line, self.prefix)) continue;
 

@@ -143,13 +143,13 @@ test "Condition parsing: Logic chains" {
 	try map.put("A", "1");
 	try map.put("B", "1");
 	try map.put("C", "0");
-	try expectEqual(parse("A & B | C"), true);
+	try expectEqual(parse("A & B | C", &map), true);
 
 	map.clearRetainingCapacity();
 	try map.put("A", "1");
 	try map.put("B", "1");
 	try map.put("C", "0");
-	try expectEqual(parse("A | B & C"), true);
+	try expectEqual(parse("A | B & C", &map), true);
 }
 
 test "Condition parsing: AND" {
@@ -159,7 +159,7 @@ test "Condition parsing: AND" {
 	try map.put("A", "1");
 	try map.put("B", "1");
 	try map.put("C", "0");
-	try expectEqual(parse("A & B & C"), false);
+	try expectEqual(parse("A & B & C", &map), false);
 }
 
 test "Condition parsing: OR" {
@@ -169,19 +169,19 @@ test "Condition parsing: OR" {
 	try map.put("FOO", "1");
 	try map.put("BAR", "0");
 	try map.put("BAZ", "0");
-	try expectEqual(parse("FOO | BAR | BAZ"), true);
+	try expectEqual(parse("FOO | BAR | BAZ", &map), true);
 
 	map.clearRetainingCapacity();
 	try map.put("FOO", "0");
 	try map.put("BAR", "1");
 	try map.put("BAZ", "0");
-	try expectEqual(parse("FOO | BAR | BAZ"), true);
+	try expectEqual(parse("FOO | BAR | BAZ", &map), true);
 
 	map.clearRetainingCapacity();
 	try map.put("FOO", "0");
 	try map.put("BAR", "0");
 	try map.put("BAZ", "1");
-	try expectEqual(parse("FOO | BAR | BAZ"), true);
+	try expectEqual(parse("FOO | BAR | BAZ", &map), true);
 }
 
 test "Condition parsing: Comparing" {
@@ -190,5 +190,5 @@ test "Condition parsing: Comparing" {
 
 	try map.put("A", "1");
 	try map.put("B", "0");
-	try expectEqual(parse("A != B"), true);
+	try expectEqual(parse("A != B", &map), true);
 }
