@@ -16,8 +16,8 @@ fn real_main() !void {
 	defer aw.deinit();
 	const allocator = aw.allocator();
 
-	defer a.flush_stdout();
-	errdefer a.flush_stderr();
+	defer a.stdout.interface.flush() catch {};
+	errdefer a.stderr.interface.flush() catch {};
 
 	const args = try std.process.argsAlloc(allocator);
 	defer std.process.argsFree(allocator, args);

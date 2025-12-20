@@ -60,7 +60,6 @@ const ConditionSplit = struct {
 	}
 };
 
-// TODO FINAL proper error messages instead of the same copy everywhere
 pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 	std.debug.print("--- init\n", .{});
 
@@ -86,6 +85,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'(' => switch (state) {
 				.expecting_expression => scope += 1,
 				else => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Expected expression, got '(' !",
 						.{input, linenr}
@@ -96,6 +96,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			')' => {
 				//if (scope == 0 or (state != .in_expression and state != .in_number)) {
 				if (scope == 0) {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Unexpected ')' without opening bracket!",
 						.{input, linenr}
@@ -104,6 +105,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				}
 				switch (state) {
 					.expecting_expression => {
+						a.errtag();
 						a.errln(
 							"{s}, line {d}: Expected expression, got ')' !",
 							.{input, linenr}
@@ -132,6 +134,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'-' => switch (state) {
 				.expecting_expression => state = .in_number,
 				else => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: invalid character '-' !",
 						.{input, linenr}
@@ -146,6 +149,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				},
 				.in_expression, .in_number => continue,
 				.expecting_operator => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Expected operator, got number!",
 						.{input, linenr}
@@ -157,6 +161,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.in_expression => continue,
 				.expecting_expression => state = .in_expression,
 				.in_number => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Unexpected letter '{}' in number!",
 						.{input, linenr, condition[i]}
@@ -164,6 +169,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 					return E;
 				},
 				.expecting_operator => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Expected operator, got '{}' !",
 						.{input, linenr, condition[i]}
@@ -175,6 +181,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.in_expression, .in_number => continue,
 				.expecting_expression => state = .in_expression,
 				.expecting_operator => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Expected operator, got '_' !",
 						.{input, linenr}
@@ -185,18 +192,19 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			},
 			'&', '|', '=' => switch (state) {
 				.expecting_expression => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Expected expression, got operator '{}' !",
 						.{input, linenr, condition[i]}
 					);
 					return E;
 				},
-				.in_expression, .in_number => state = .expecting_expression,
-				.expecting_operator => state = .expecting_expression
+				else => state = .expecting_expression
 			},
 			'<', '>' => {
 				switch (state) {
 					.expecting_expression => {
+						a.errtag();
 						a.errln(
 							"{s}, line {d}: Expected expression, " ++
 							"got comparison operator '{}' !",
@@ -204,24 +212,14 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 						);
 						return E;
 					},
-					.in_expression, .in_number => {
-						// TODO CONSIDER why did i write this?
-						if (scope > 0) {
-							a.errln(
-								"{s}, line {d}: TODO!",
-								.{input, linenr}
-							);
-							return E;
-						}
-						state = .expecting_expression;
-					},
-					.expecting_operator => state = .expecting_expression
+					else => state = .expecting_expression
 				}
 				if (i < condition.len - 1 and condition[i + 1] == '=') i += 1;
 			},
 			'!' => switch (state) {
 				.expecting_expression => continue,
 				.in_expression, .in_number => {
+					a.errtag();
 					a.errln(
 						"{s}, line {d}: Unexpected '!' in number!",
 						.{input, linenr}
@@ -230,6 +228,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				},
 				.expecting_operator => {
 					if (i == condition.len - 1 or condition[i + 1] != '=') {
+						a.errtag();
 						a.errln(
 							"{s}, line {d}: Expected operator, found '!' !",
 							.{input, linenr}
@@ -241,6 +240,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				}
 			},
 			else => {
+				a.errtag();
 				a.errln(
 					"{s}, line {d}: Expected operator, found '!' !",
 					.{input, linenr}
@@ -254,6 +254,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 	// TODO NOW in order for trailing ) to work
 	//if (scope > 0 or (state != .in_expression and state != .in_number)) {
 	if (scope > 0 or state == .expecting_expression) {
+		a.errtag();
 		a.errln(
 			"{s}, line {d}: Expected operator, found '!' !",
 			.{input, linenr}
@@ -371,6 +372,7 @@ fn is_number(buf: []const u8) bool {
 /// for a more helpful error message.
 fn check_overflow(buf: []const u8, input: []const u8, linenr: usize) !void {
 	_ = a.parsei(buf) catch {
+		a.errtag();
 		a.errln(
 			"{s}, line {d}: " ++
 			"The absolute value of {s} is too big to represent!",

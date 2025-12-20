@@ -1,6 +1,8 @@
 const std = @import("std");
 const a = @import("alias.zig");
 
+const E = error.Generic;
+
 pub const FlagState = enum(u8) {
 	not_encountered,
 	expecting_arg,
@@ -15,7 +17,7 @@ const TEXT_CORRECT_USAGE = "See 'm5 -h' for correct usage.";
 pub fn validate(args: [][:0]u8) !void {
 	if (args.len == 1 or a.contains_str(args, "--help") or a.contains_str(args, "-h")) {
 		a.print_help();
-		return error.Generic;
+		return E;
 	}
 
 	var inputs_encountered = false;
@@ -25,74 +27,83 @@ pub fn validate(args: [][:0]u8) !void {
 	for (args[1..], 1..) |arg, i| {
 		if (a.eql(arg, "-o")) {
 			if (!inputs_encountered) {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("-o flag has no preceeding inputs!", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			if (i == args.len - 1) {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("No output after -o flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			if (args[i + 1][0] == '-') {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("-o flag can't be followed by another flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			o_state = .expecting_arg;
 		}
 		else if (a.eql(arg, "-p")) {
 			if (p_state != .not_encountered) {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("Trying to pass a second -p flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			if (i == args.len - 1) {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("No prefix after -p flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			if (args[i + 1][0] == '-') {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("-p flag can't be followed by another flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			p_state = .expecting_arg;
 		}
 		else if (a.startswith(arg, "-D")) {
 			const definition = arg["-D".len..];
 			if (definition.len == 0) {
-				a.err(TEXT_INVALID_ARGS);
+				a.errtag();
+				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("-D flag must follow a macro name with an optional value.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
-				return error.Generic;
+				return E;
 			}
 			switch (definition[0]) {
 				'-', '0'...'9' => {
-					a.err(TEXT_INVALID_ARGS);
+					a.errtag();
+					a.err(TEXT_INVALID_ARGS, .{});
 					a.errln("You can't define a macro starting with a dash or a number!", .{});
 					a.errln(TEXT_CORRECT_USAGE, .{});
-					return error.Generic;
+					return E;
 				},
 				else => {}
 			}
 		}
 		else if (a.eql(arg, "-v")) continue
 		else if (arg[0] == '-') {
-			a.err(TEXT_INVALID_ARGS);
+			a.errtag();
+			a.err(TEXT_INVALID_ARGS, .{});
 			a.errln(
 				\\Non-existent flag given, i.e. one that's none out of these:
 				\\  -D, -h, -o, -p, -v
 				, .{}
 			);
 			a.errln(TEXT_CORRECT_USAGE, .{});
-			return error.Generic;
+			return E;
 		}
 		else {
 			if (o_state == .expecting_arg) {
@@ -106,8 +117,9 @@ pub fn validate(args: [][:0]u8) !void {
 			}
 
 			_ = std.fs.cwd().statFile(arg) catch {
+				a.errtag();
 				a.errln("Could not open input file '{s}'!", .{arg});
-				return error.Generic;
+				return E;
 			};
 			// TOOD NOW CONSIDER MOVE validate_input() here
 			inputs_encountered = true;

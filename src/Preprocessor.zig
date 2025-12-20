@@ -9,6 +9,8 @@ const ArrayList = std.ArrayList;
 const File = std.fs.File;
 const StringHashMap = std.StringHashMap;
 
+const E = error.Generic;
+
 // Token messaging what kind of argument is expected next
 const ExpectationStatus = enum(u8) {nothing, output, prefix};
 const Pair = struct { key: []const u8, value: []const u8 };
@@ -63,8 +65,9 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		else {
 			if (expecting == .output) {
 				var file = std.fs.cwd().createFile(arg, .{}) catch {
+					a.errtag();
 					a.errln("Could not create output file '{s}'!", .{arg});
-					return error.Generic;
+					return E;
 				};
 				defer file.close();
 
@@ -94,8 +97,9 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 /// Check whether the input file lacks any m5 syntax errors.
 fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
+		a.errtag();
 		a.errln("Could not open input file '{s}'!", .{input});
-		return error.Generic;
+		return E;
 	};
 	defer file.close();
 
@@ -128,22 +132,24 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 		}
 		else if (a.startswith(line_wo_prefix, "elif")) {
 			if (scope == 0) {
+				a.errtag();
 				a.errln(
 					"{s}, line {d}: There can be no elif without an if clause prior!",
 					.{input, linenr}
 				);
-				return error.Generic;
+				return E;
 			}
 			const condition = line_wo_prefix["elif".len..];
 			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "end")) {
 			if (scope == 0) {
+				a.errtag();
 				a.errln(
 					"{s}, line {d}: There can be no end without an if clause prior!",
 					.{input, linenr}
 				);
-				return error.Generic;
+				return E;
 			}
 			scope -= 1;
 		}
@@ -154,18 +160,20 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 					orelse line_wo_prefix.len;
 				break :blk line_wo_prefix[0..space_i];
 			};
+			a.errtag();
 			a.errln(
 				\\{s}, line {d}: Invalid keyword '{s}'!
 				\\Should be 'if', 'elif' or 'end'"
 				, .{input, linenr, first_word}
 			);
-			return error.Generic;
+			return E;
 		}
 	}
 
 	if (scope == 0) return;
+	a.errtag();
 	a.errln("{s}, line {d}: If clause lacks end keyword!", .{input, linenr});
-	return error.Generic;
+	return E;
 }
 
 fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
@@ -200,7 +208,8 @@ fn read_lines(
 	// otherwise recompute
 
 	var linenr: u32 = 1;
-	var scope: u32, var ignore_scopes: u32 = .{0, 0};
+	var scope: u32 = 0;
+	var ignore_scopes: u32 = 0;
 	var write_line: WriteLine = .yes;
 
 	while (

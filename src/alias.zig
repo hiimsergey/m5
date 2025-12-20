@@ -5,7 +5,7 @@ const std = @import("std");
 var stderr_buf: [1024]u8 = undefined;
 var stdout_buf: [1024]u8 = undefined;
 pub var stdout = std.fs.File.stdout().writer(&stdout_buf);
-var stderr = std.fs.File.stderr().writer(&stderr_buf);
+pub var stderr = std.fs.File.stderr().writer(&stderr_buf);
 
 pub fn contains_str(haystack: []const []const u8, needle: []const u8) bool {
 	for (haystack) |hay| if (eql(hay, needle)) return true;
@@ -24,23 +24,17 @@ pub fn trimleft(slice: []const u8, values_to_strip: []const u8) []const u8 {
 	return std.mem.trimLeft(u8, slice, values_to_strip);
 }
 
-pub fn flush_stdout() void {
-	stdout.interface.flush() catch {};
-}
-pub fn flush_stderr() void {
-	stderr.interface.flush() catch {};
-}
 pub fn println(comptime fmt: []const u8, args: anytype) void {
 	stdout.interface.print(fmt ++ "\n", args) catch {};
 }
 pub fn errln(comptime msg: []const u8, args: anytype) void {
-	_ = stderr.interface.write("\x1b[31merror: ") catch {};
 	stderr.interface.print(msg ++ "\n", args) catch {};
 }
-// TODO NOW this is a bad idea cause "error:" gets doubled
-pub fn err(comptime msg: []const u8) void {
+pub fn err(comptime msg: []const u8, args: anytype) void {
+	stderr.interface.print(msg, args) catch {};
+}
+pub fn errtag() void {
 	_ = stderr.interface.write("\x1b[31merror: ") catch {};
-	stderr.interface.print(msg, .{}) catch {};
 }
 pub fn print_help() void {
 	println(

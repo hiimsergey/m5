@@ -1,9 +1,13 @@
 const std = @import("std");
 const parser = @import("parser.zig");
 
+const Map = std.StringHashMap([]const u8);
+
 const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
 const parse = parser.parse;
+
+const gpa = std.testing.allocator;
 
 const M5 = "zig-out/bin/m5";
 const TESTFILE = "test.txt";
@@ -22,7 +26,7 @@ fn testFile(tmpdir: *std.testing.TmpDir, content: []const u8) ![]const u8 {
 	try writer.interface.flush();
 
 	return try std.mem.concat(
-		std.testing.allocator, u8,
+		gpa, u8,
 		&.{".zig-cache/tmp/", &tmpdir.sub_path, "/", TESTFILE}
 	);
 }
@@ -35,7 +39,7 @@ const Command = struct {
 
 	fn init(args: []const []const u8) !Command {
 		var result: Command = undefined;
-		result.child = std.process.Child.init(args, std.testing.allocator);
+		result.child = std.process.Child.init(args, gpa);
 
 		result.child.stdout_behavior = .Pipe;
 		result.child.stderr_behavior = .Pipe;
@@ -44,7 +48,7 @@ const Command = struct {
 		result.stdout = std.ArrayList(u8).empty;
 		result.stderr = std.ArrayList(u8).empty;
 		try result.child.collectOutput(
-			std.testing.allocator,
+			gpa,
 			&result.stdout, &result.stderr,
 			std.math.maxInt(usize)
 		);
@@ -54,8 +58,8 @@ const Command = struct {
 	}
 
 	fn deinit(self: *Command) void {
-		self.stdout.deinit(std.testing.allocator);
-		self.stderr.deinit(std.testing.allocator);
+		self.stdout.deinit(gpa);
+		self.stderr.deinit(gpa);
 	}
 	
 	fn expectStdoutEq(self: *const Command, cmp: []const u8) !void {
@@ -74,7 +78,7 @@ test {
 		\\m5 end
 		\\
 	);
-	defer std.testing.allocator.free(filepath);
+	defer gpa.free(filepath);
 
 	var c0 = try Command.init(&.{M5, "-p", "m5", filepath});
 	try c0.expectStdoutEq("");
@@ -98,7 +102,7 @@ test {
 		\\hi alice
 		\\m5 end
 	);
-	defer std.testing.allocator.free(filepath);
+	defer gpa.free(filepath);
 
 	var c0 = try Command.init(&.{M5, "-p", "m5", filepath});
 	try c0.expectStdoutEq("");
@@ -113,8 +117,11 @@ test {
 	c2.deinit();
 }
 
-// TODO FINAL FIX ALL tests
 test "Condition validation" {
+	// TODO PLAN
+	// maybe store all tests in an array
+	// and use it to both validate and run tests
+	// or write a function that does both validation and testing
 	try validate("a & b | c");
 	try validate("a & (b & c) | d | (a | (b & c))");
 	try validate("(((b)))");
@@ -122,14 +129,14 @@ test "Condition validation" {
 	try validate("a < b < c"); // (0|1) < c
 	try validate("a != b");
 
-	const GEN = error.Generic;
-	try expectError(GEN, validate("a |"));
-	try expectError(GEN, validate("a ! b"));
-	try expectError(GEN, validate("2bad"));
+	const E = error.Generic;
+	try expectError(E, validate("a |"));
+	try expectError(E, validate("a ! b"));
+	try expectError(E, validate("2bad"));
 }
 
 test "Condition parsing: Literals" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
+	var map = Map.init(gpa);
 	defer map.deinit();
 
 	try expectEqual(parse("5 > 2 & 1 & 0", &map), false);
@@ -137,7 +144,7 @@ test "Condition parsing: Literals" {
 }
 
 test "Condition parsing: Logic chains" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
+	var map = Map.init(gpa);
 	defer map.deinit();
 
 	try map.put("A", "1");
@@ -153,7 +160,7 @@ test "Condition parsing: Logic chains" {
 }
 
 test "Condition parsing: AND" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
+	var map = Map.init(gpa);
 	defer map.deinit();
 
 	try map.put("A", "1");
@@ -163,7 +170,7 @@ test "Condition parsing: AND" {
 }
 
 test "Condition parsing: OR" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
+	var map = Map.init(gpa);
 	defer map.deinit();
 
 	try map.put("FOO", "1");
@@ -185,7 +192,7 @@ test "Condition parsing: OR" {
 }
 
 test "Condition parsing: Comparing" {
-	var map = std.StringHashMap([]const u8).init(std.testing.allocator);
+	var map = Map.init(gpa);
 	defer map.deinit();
 
 	try map.put("A", "1");
