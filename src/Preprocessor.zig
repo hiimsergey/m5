@@ -47,22 +47,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
 
 	for (args[1..]) |arg| {
-		if (a.startswith(arg, "-D")) {
-			const definition = arg["-D".len..];
-			const pair: KV = blk: {
-				const equals_i = std.mem.indexOfScalar(u8, definition, '=') orelse
-					break :blk .{ .key = definition, .value = "" };
-				break :blk .{
-					.key = definition[0..equals_i],
-					.value = definition[equals_i + 1..]
-				};
-			};
-			try self.macros.put(pair.key, pair.value);
-		}
-		else if (a.eql(arg, "-p")) expecting = .prefix
-		else if (a.eql(arg, "-o")) expecting = .output
-		else if (arg[0] == '-') continue // gotta be the -v flag
-		else switch (expecting) {
+		switch (expecting) {
 			.output => {
 				var file = std.fs.cwd().createFile(arg, .{}) catch {
 					a.errtag();
@@ -84,11 +69,27 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 				expecting = .nothing;
 				continue;
 			},
-			else => {
-				// Input file
-				try self.validate_input(allocator, arg);
-				try self.inputs.append(allocator, arg);
-			}
+			else => {}
+		}
+		if (a.startswith(arg, "-D")) {
+			const definition = arg["-D".len..];
+			const pair: KV = blk: {
+				const equals_i = std.mem.indexOfScalar(u8, definition, '=') orelse
+					break :blk .{ .key = definition, .value = "" };
+				break :blk .{
+					.key = definition[0..equals_i],
+					.value = definition[equals_i + 1..]
+				};
+			};
+			try self.macros.put(pair.key, pair.value);
+		}
+		else if (a.eql(arg, "-p")) expecting = .prefix
+		else if (a.eql(arg, "-o")) expecting = .output
+		else if (arg[0] == '-') continue // gotta be the -v flag
+		else {
+			// Input file
+			try self.validate_input(allocator, arg);
+			try self.inputs.append(allocator, arg);
 		}
 	}
 
@@ -113,9 +114,13 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var linenr: usize = 1;
 	var scope: usize = 0;
 
-	while (reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
+	while (
+		reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0
+	) : ({
 		allocating.clearRetainingCapacity();
-		reader.interface.toss(@intFromBool(reader.interface.seek < reader.interface.end)); // skip newline
+		reader.interface.toss(
+			@intFromBool(reader.interface.seek < reader.interface.end)
+		); // skip newline but not when the file doesn't end with one
 		linenr += 1;
 	}) {
 		const line = allocating.written();

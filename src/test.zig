@@ -17,6 +17,8 @@ fn validate(condition: []const u8) !void {
 	return parser.validate(condition, TESTFILE, 0);
 }
 
+/// Create a temporary file with `content` as the file content and return the relative
+/// file path.
 fn testFile(tmpdir: *std.testing.TmpDir, content: []const u8) ![]const u8 {
 	var file = try tmpdir.dir.createFile(TESTFILE, .{ .read = true, .truncate = true });
 	defer file.close();

@@ -25,6 +25,16 @@ pub fn validate(args: [][:0]u8) !void {
 	var p_state = FlagState.not_encountered;
 
 	for (args[1..], 1..) |arg, i| {
+		if (o_state == .expecting_arg) {
+			inputs_encountered = false;
+			o_state = .arg_encountered;
+			continue;
+		}
+		if (p_state == .expecting_arg) {
+			p_state = .arg_encountered;
+			continue;
+		}
+
 		if (a.eql(arg, "-o")) {
 			if (!inputs_encountered) {
 				a.errtag();
@@ -37,13 +47,6 @@ pub fn validate(args: [][:0]u8) !void {
 				a.errtag();
 				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("No output after -o flag.", .{});
-				a.errln(TEXT_CORRECT_USAGE, .{});
-				return E;
-			}
-			if (args[i + 1][0] == '-') {
-				a.errtag();
-				a.err(TEXT_INVALID_ARGS, .{});
-				a.errln("-o flag can't be followed by another flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
 				return E;
 			}
@@ -61,13 +64,6 @@ pub fn validate(args: [][:0]u8) !void {
 				a.errtag();
 				a.err(TEXT_INVALID_ARGS, .{});
 				a.errln("No prefix after -p flag.", .{});
-				a.errln(TEXT_CORRECT_USAGE, .{});
-				return E;
-			}
-			if (args[i + 1][0] == '-') {
-				a.errtag();
-				a.err(TEXT_INVALID_ARGS, .{});
-				a.errln("-p flag can't be followed by another flag.", .{});
 				a.errln(TEXT_CORRECT_USAGE, .{});
 				return E;
 			}
@@ -106,16 +102,6 @@ pub fn validate(args: [][:0]u8) !void {
 			return E;
 		}
 		else {
-			if (o_state == .expecting_arg) {
-				inputs_encountered = false;
-				o_state = .arg_encountered;
-				continue;
-			}
-			if (p_state == .expecting_arg) {
-				p_state = .arg_encountered;
-				continue;
-			}
-
 			_ = std.fs.cwd().statFile(arg) catch {
 				a.errtag();
 				a.errln("Could not open input file '{s}'!", .{arg});
