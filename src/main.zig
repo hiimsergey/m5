@@ -30,11 +30,11 @@ fn real_main() !void {
 	try pp.run(allocator, args);
 }
 
+// TODO "m5 elseX" should complain that elseX is an invalid keyword
 // TODO FINAL COMMENT ALL
 // TODO FINAL CONSIDER replacing usize with u32 everywhere
 // TODO FINAL CHECK if surpassing the scope limit is handled elegantly
 // TODO FINAL REMOVE std.debug.print calls
-// TODO FINAL processing my example file should work
 
 // TODO ADD tests:
 //     nested ifs

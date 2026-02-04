@@ -69,7 +69,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 				expecting = .nothing;
 				continue;
 			},
-			else => {}
+			.nothing => {}
 		}
 		if (a.startswith(arg, "-D")) {
 			const definition = arg["-D".len..];
@@ -115,8 +115,8 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var scope: usize = 0;
 
 	while (
-		reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0
-	) : ({
+		reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
+	) |_| : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(
 			@intFromBool(reader.interface.seek < reader.interface.end)
@@ -135,6 +135,16 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 			scope += 1;
 			const condition = line_wo_prefix["if".len..];
 			try parser.validate(condition, input, linenr);
+		}
+		else if (a.startswith(line_wo_prefix, "else")) {
+			if (scope == 0) {
+				a.errtag();
+				a.errln(
+					"{s}, line {d}: There can be no else without an if clause prior!",
+					.{input, linenr}
+				);
+				return E;
+			}
 		}
 		else if (a.startswith(line_wo_prefix, "elif")) {
 			if (scope == 0) {
@@ -169,7 +179,7 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 			a.errtag();
 			a.errln(
 				\\{s}, line {d}: Invalid keyword '{s}'!
-				\\Should be 'if', 'elif' or 'end'"
+				\\Should be 'if', 'else', 'elif' or 'end'"
 				, .{input, linenr, first_word}
 			);
 			return E;
@@ -245,13 +255,19 @@ fn read_lines(
 				false => .no
 			};
 		}
+		else if (a.startswith(condition_line, "else")) {
+			write_line = if (write_line != .no) .ignore else .yes;
+		}
 		else if (a.startswith(condition_line, "elif")) {
-			if (write_line != .yes) continue;
-			write_line = if (write_line != .no) .ignore
-				else switch (parser.parse(condition_line["elif".len..], &self.macros)) {
+			write_line = switch (write_line) {
+				.yes, .ignore => .ignore,
+				else => switch (
+					parser.parse(condition_line["elif".len..], &self.macros)
+				) {
 					true => .yes,
 					false => .no
-				};
+				}
+			};
 		}
 		else if (a.startswith(condition_line, "end")) {
 			if (ignore_scopes == 0) write_line = .yes

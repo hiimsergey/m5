@@ -11,7 +11,10 @@ A dead-simple m4 alternative, written in Zig.
 m5 only supports if-else blocks with numeric or boolean variables as expressions.
 
 Let's take C as an example and "// m5" as a prefix.
+
 TODO mention that leading spaces and tabs are no issue
+
+TODO mention that the positioning of -p matters
 
 ### If clauses
 ```c

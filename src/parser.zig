@@ -61,8 +61,6 @@ const ConditionSplit = struct {
 };
 
 pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
-	std.debug.print("--- init\n", .{});
-
 	var scope: usize = 0;
 	var state = ParseState.expecting_expression;
 	var cur_numeric_literal: []const u8 = "";
@@ -243,7 +241,6 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				return E;
 			}
 		}
-		std.debug.print("char: '{c}' state: {s}\n", .{condition[i], @tagName(state)});
 	}
 
 	// TODO NOW in order for trailing ) to work
