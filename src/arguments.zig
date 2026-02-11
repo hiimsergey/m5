@@ -102,6 +102,17 @@ pub fn validate(args: [][:0]u8) !void {
 			return E;
 		}
 		else {
+			std.debug.assert(p_state != .expecting_arg);
+			if (p_state != .arg_encountered) {
+				a.errtag();
+				a.errln(
+					\\No prefix given for input '{s}'!
+					\\You can pass a prefix with the -p flag!
+					, .{arg}
+				);
+				return E;
+			}
+
 			_ = std.fs.cwd().statFile(arg) catch {
 				a.errtag();
 				a.errln("Could not open input file '{s}'!", .{arg});

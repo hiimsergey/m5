@@ -71,37 +71,58 @@ const Command = struct {
 };
 
 test {
-	var tmpdir: std.testing.TmpDir = std.testing.tmpDir(.{});
-	defer tmpdir.cleanup();
-
 	var file = try set_test_file(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
-		\\
 	);
 	defer file.close();
 
 	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	defer c0.deinit();
 	try c0.expect_result(0, "");
-	c0.deinit();
 
 	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	defer c1.deinit();
 	try c1.expect_result(0, "hi alice\n");
-	c1.deinit();
 
 	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	defer c2.deinit();
 	try c2.expect_result(0, "hi alice\n");
-	c2.deinit();
 
-	// TODO TEST putting -p at the very end
-	// TODO TEST missing newline should not impact result
+	var c3 = try Command.init(&.{M5, TESTFILE, "-DALICE", "-p", "m5"});
+	defer c3.deinit();
+	try c3.expect_result(1, "");
+
+	var c4 = try Command.init(&.{M5, TESTFILE, "-DALICE"});
+	defer c4.deinit();
+	try c4.expect_result(1, "");
 }
 
 test {
-	var tmpdir: std.testing.TmpDir = std.testing.tmpDir(.{});
-	defer tmpdir.cleanup();
+	var file = try set_test_file(
+		\\m5 if ALICE
+		\\hi alice
+		\\m5 end
+	);
+	defer file.close();
 
+	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	defer c0.deinit();
+	try c0.expect_result(0, "");
+
+	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	defer c1.deinit();
+	try c1.expect_result(0, "hi alice\n");
+
+	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	defer c2.deinit();
+	try c2.expect_result(0, "hi alice\n");
+
+	// TODO TEST putting -p at the very end
+}
+
+test {
 	// TODO NOW
 	var file = try set_test_file(
 		\\m5 if ALICE
@@ -114,9 +135,6 @@ test {
 }
 
 test {
-	var tmpdir: std.testing.TmpDir = std.testing.tmpDir(.{});
-	defer tmpdir.cleanup();
-
 	var file = try set_test_file(
 		\\m5 if ALICE
 		\\hi alice

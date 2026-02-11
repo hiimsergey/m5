@@ -179,7 +179,7 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 			a.errtag();
 			a.errln(
 				\\{s}, line {d}: Invalid keyword '{s}'!
-				\\Should be 'if', 'else', 'elif' or 'end'"
+				\\Should be 'if', 'else', 'elif' or 'end'!
 				, .{input, linenr, first_word}
 			);
 			return E;
@@ -232,7 +232,9 @@ fn read_lines(
 		reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
 	) |_| : ({
 		allocating.clearRetainingCapacity();
-		reader.interface.toss(1); // skip newline
+		reader.interface.toss(
+			@intFromBool(reader.interface.seek < reader.interface.end)
+		); // skip newline but not when the file doesn't end with one
 		linenr += 1;
 	}) {
 		const line: []u8 = allocating.written();
