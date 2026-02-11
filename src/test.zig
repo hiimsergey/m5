@@ -3,34 +3,33 @@ const parser = @import("parser.zig");
 
 const Map = std.StringHashMap([]const u8);
 
+const expect = std.testing.expect;
 const expectError = std.testing.expectError;
-const expectEqual = std.testing.expectEqual;
 const parse = parser.parse;
 
 const gpa = std.testing.allocator;
 
 const M5 = "zig-out/bin/m5";
-const TESTFILE = "test.txt";
+const TESTFILE = ".zig-cache/test.txt";
 var buf: [1024]u8 = undefined;
 
 fn validate(condition: []const u8) !void {
 	return parser.validate(condition, TESTFILE, 0);
 }
 
-/// Create a temporary file with `content` as the file content and return the relative
-/// file path.
-fn testFile(tmpdir: *std.testing.TmpDir, content: []const u8) ![]const u8 {
-	var file = try tmpdir.dir.createFile(TESTFILE, .{ .read = true, .truncate = true });
-	defer file.close();
+/// Set `content` as the file content of the test file at `TESTFILE`
+/// and return a file handle.
+fn set_test_file(content: []const u8) !std.fs.File {
+	var result = try std.fs.cwd().createFile(
+		TESTFILE,
+		.{ .read = true, .truncate = true }
+	);
 
-	var writer = file.writer(&buf);
+	var writer = result.writer(&buf);
 	try writer.interface.writeAll(content);
 	try writer.interface.flush();
 
-	return try std.mem.concat(
-		gpa, u8,
-		&.{".zig-cache/tmp/", &tmpdir.sub_path, "/", TESTFILE}
-	);
+	return result;
 }
 
 const Command = struct {
@@ -41,14 +40,15 @@ const Command = struct {
 
 	fn init(args: []const []const u8) !Command {
 		var result: Command = undefined;
-		result.child = std.process.Child.init(args, gpa);
 
+		result.child = std.process.Child.init(args, gpa);
 		result.child.stdout_behavior = .Pipe;
 		result.child.stderr_behavior = .Pipe;
 		try result.child.spawn();
 
 		result.stdout = std.ArrayList(u8).empty;
 		result.stderr = std.ArrayList(u8).empty;
+
 		try result.child.collectOutput(
 			gpa,
 			&result.stdout, &result.stderr,
@@ -64,8 +64,8 @@ const Command = struct {
 		self.stderr.deinit(gpa);
 	}
 	
-	fn expectStdoutEq(self: *const Command, cmp: []const u8) !void {
-		try std.testing.expectEqual(0, self.term.Exited);
+	fn expect_result(self: *const Command, ret: u8, cmp: []const u8) !void {
+		try std.testing.expectEqual(ret, self.term.Exited);
 		try std.testing.expectEqualStrings(cmp, self.stdout.items);
 	}
 };
@@ -74,49 +74,68 @@ test {
 	var tmpdir: std.testing.TmpDir = std.testing.tmpDir(.{});
 	defer tmpdir.cleanup();
 
-	const filepath = try testFile(&tmpdir,
+	var file = try set_test_file(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
 		\\
 	);
-	defer gpa.free(filepath);
+	defer file.close();
 
-	var c0 = try Command.init(&.{M5, "-p", "m5", filepath});
-	try c0.expectStdoutEq("");
+	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	try c0.expect_result(0, "");
 	c0.deinit();
 
-	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", filepath});
-	try c1.expectStdoutEq("hi alice\n");
+	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	try c1.expect_result(0, "hi alice\n");
 	c1.deinit();
 
-	var c2 = try Command.init(&.{M5, "-p", "m5", filepath, "-DALICE"});
-	try c2.expectStdoutEq("hi alice\n");
+	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	try c2.expect_result(0, "hi alice\n");
 	c2.deinit();
+
+	// TODO TEST putting -p at the very end
+	// TODO TEST missing newline should not impact result
 }
 
 test {
 	var tmpdir: std.testing.TmpDir = std.testing.tmpDir(.{});
 	defer tmpdir.cleanup();
 
-	const filepath = try testFile(&tmpdir,
+	// TODO NOW
+	var file = try set_test_file(
+		\\m5 if ALICE
+		\\m5 if BOB
+		\\m5 end
+		\\m5 end
+		\\
+	);
+	defer file.close();
+}
+
+test {
+	var tmpdir: std.testing.TmpDir = std.testing.tmpDir(.{});
+	defer tmpdir.cleanup();
+
+	var file = try set_test_file(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
+		\\
 	);
-	defer gpa.free(filepath);
+	defer file.close();
 
-	var c0 = try Command.init(&.{M5, "-p", "m5", filepath});
-	try c0.expectStdoutEq("");
-	c0.deinit();
+	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	defer c0.deinit();
+	try c0.expect_result(0, "");
 
-	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", filepath});
-	try c1.expectStdoutEq("hi alice\n");
-	c1.deinit();
+	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	defer c1.deinit();
+	try c1.expect_result(0, "hi alice\n");
 
-	var c2 = try Command.init(&.{M5, "-p", "m5", filepath, "-DALICE"});
-	try c2.expectStdoutEq("hi alice\n");
-	c2.deinit();
+	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	defer c2.deinit();
+	try c2.expect_result(0, "hi alice\n");
 }
 
 test "Condition validation" {
@@ -141,8 +160,8 @@ test "Condition parsing: Literals" {
 	var map = Map.init(gpa);
 	defer map.deinit();
 
-	try expectEqual(parse("5 > 2 & 1 & 0", &map), false);
-	try expectEqual(parse("!FOO", &map), true);
+	try expect(!parse("5 > 2 & 1 & 0", &map));
+	try expect(parse("!FOO", &map));
 }
 
 test "Condition parsing: Logic chains" {
@@ -152,13 +171,13 @@ test "Condition parsing: Logic chains" {
 	try map.put("A", "1");
 	try map.put("B", "1");
 	try map.put("C", "0");
-	try expectEqual(parse("A & B | C", &map), true);
+	try expect(parse("A & B | C", &map));
 
 	map.clearRetainingCapacity();
 	try map.put("A", "1");
 	try map.put("B", "1");
 	try map.put("C", "0");
-	try expectEqual(parse("A | B & C", &map), true);
+	try expect(parse("A | B & C", &map));
 }
 
 test "Condition parsing: AND" {
@@ -168,7 +187,7 @@ test "Condition parsing: AND" {
 	try map.put("A", "1");
 	try map.put("B", "1");
 	try map.put("C", "0");
-	try expectEqual(parse("A & B & C", &map), false);
+	try expect(!parse("A & B & C", &map));
 }
 
 test "Condition parsing: OR" {
@@ -178,19 +197,19 @@ test "Condition parsing: OR" {
 	try map.put("FOO", "1");
 	try map.put("BAR", "0");
 	try map.put("BAZ", "0");
-	try expectEqual(parse("FOO | BAR | BAZ", &map), true);
+	try expect(parse("FOO | BAR | BAZ", &map));
 
 	map.clearRetainingCapacity();
 	try map.put("FOO", "0");
 	try map.put("BAR", "1");
 	try map.put("BAZ", "0");
-	try expectEqual(parse("FOO | BAR | BAZ", &map), true);
+	try expect(parse("FOO | BAR | BAZ", &map));
 
 	map.clearRetainingCapacity();
 	try map.put("FOO", "0");
 	try map.put("BAR", "0");
 	try map.put("BAZ", "1");
-	try expectEqual(parse("FOO | BAR | BAZ", &map), true);
+	try expect(parse("FOO | BAR | BAZ", &map));
 }
 
 test "Condition parsing: Comparing" {
@@ -199,5 +218,5 @@ test "Condition parsing: Comparing" {
 
 	try map.put("A", "1");
 	try map.put("B", "0");
-	try expectEqual(parse("A != B", &map), true);
+	try expect(parse("A != B", &map));
 }
