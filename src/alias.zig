@@ -20,8 +20,8 @@ pub fn startswith(a: []const u8, b: []const u8) bool {
 pub fn parsei(buf: []const u8) !i32 {
 	return std.fmt.parseInt(i32, buf, 10);
 }
-pub fn trimleft(slice: []const u8, values_to_strip: []const u8) []const u8 {
-	return std.mem.trimLeft(u8, slice, values_to_strip);
+pub fn trim_ws_left(slice: []const u8) []const u8 {
+	return std.mem.trimLeft(u8, slice, " \t");
 }
 
 pub fn println(comptime fmt: []const u8, args: anytype) void {
@@ -40,7 +40,7 @@ pub fn print_help() void {
 	println(
 		\\m5 - a simple text file processor
 		\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-		\\v0.1.0  GPL-3.0
+		\\v0.1.1  GPL-3.0
 		\\
 		\\Usage:
 		\\    m5 (INPUTS | OPTION)...

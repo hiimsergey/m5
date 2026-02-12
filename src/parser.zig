@@ -325,7 +325,7 @@ fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) bo
 }
 
 fn term_value(term: []const u8, macros: *const StringHashMap([]const u8)) []const u8 {
-	const trim_nots = a.trimleft(term, "!");
+	const trim_nots = std.mem.trimLeft(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");

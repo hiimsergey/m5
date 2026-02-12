@@ -1,0 +1,28 @@
+//! Comptime wrapper that resolves to the slow but helpful `DebugAllocator` in
+//! Debug mode and the performant but dangerous `c_allocator` in all the other modes.
+
+const builtin = @import("builtin");
+const std = @import("std");
+const DebugAllocator = std.heap.DebugAllocator(.{});
+const Self = @This();
+
+const is_debug = builtin.mode == .Debug;
+
+dbg_state: if (is_debug) DebugAllocator else void,
+
+/// Initialize Zig's `DebugAllocator`.
+pub fn init() Self {
+	return if (is_debug) .{ .dbg_state = DebugAllocator.init } else .{};
+}
+
+/// Return the `DebugAllocator`'s allocator.
+pub fn allocator(self: *Self) std.mem.Allocator {
+	return if (is_debug) self.dbg_state.allocator() else std.heap.c_allocator;
+}
+
+/// Deinit Zig's `DebugAllocator` and log an error message if
+/// the program contains Zig-side memory leaks.
+pub fn deinit(self: *Self) void {
+	if (is_debug and self.dbg_state.deinit() == .leak)
+		std.debug.print("ERROR: Leaks found!\n", .{});
+}

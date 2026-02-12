@@ -131,6 +131,13 @@ test "Invalid if-block scoping" {
 	// TODO TEST too much end
 }
 
+test "Else keyword" {
+	// TODO TEST else
+	// TODO TEST elsefoobar
+	// TODO TEST else foobar
+	// TODO TEST else if condition
+}
+
 test "Nested if-blocks" {
 	// TODO NOW
 	var file = try set_test_file(

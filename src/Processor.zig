@@ -127,16 +127,31 @@ fn validate_input(self: *Self, gpa: Allocator, input: []const u8) !void {
 		if (!a.startswith(line, self.prefix)) continue;
 
 		const line_wo_prefix = blk: {
-			const wo_leading_whitespace = a.trimleft(line, " \t");
+			const wo_leading_whitespace = a.trim_ws_left(line);
 			const prefix_skipped = wo_leading_whitespace[self.prefix.len..];
-			break :blk a.trimleft(prefix_skipped, " \t");
+			break :blk a.trim_ws_left(prefix_skipped);
 		};
 		if (a.startswith(line_wo_prefix, "if")) {
 			scope += 1;
 			const condition = line_wo_prefix["if".len..];
 			try parser.validate(condition, input, linenr);
 		}
+		// TODO NOW this is both lowk inefficient and results in an proper errmsg
+		// with lines like "m5 else          X         "
+		// TODO REMOVE elif keyword
 		else if (a.startswith(line_wo_prefix, "else")) {
+			if (std.mem.trimRight(u8, line_wo_prefix, " \t").len == "else".len) continue;
+
+			const space_i = std.mem.indexOf(u8, line_wo_prefix, " \t") orelse {
+				a.errtag();
+				a.errln(
+					\\{s}, line {d}: Invalid keyword '{s}'!
+					\\Should be 'if', 'else' or 'end'!
+					, .{input, linenr, line_wo_prefix}
+				);
+				return E;
+			};
+
 			if (scope == 0) {
 				a.errtag();
 				a.errln(
@@ -145,17 +160,18 @@ fn validate_input(self: *Self, gpa: Allocator, input: []const u8) !void {
 				);
 				return E;
 			}
-		}
-		else if (a.startswith(line_wo_prefix, "elif")) {
-			if (scope == 0) {
+			
+			const else_clause = a.trim_ws_left(line_wo_prefix[space_i..]);
+			if (!a.startswith(else_clause, "if")) {
 				a.errtag();
 				a.errln(
-					"{s}, line {d}: There can be no elif without an if clause prior!",
-					.{input, linenr}
+					"{s}, line {d}: Expected 'else if <condition>', got invalid sequence 'else {s}'!",
+					.{input, linenr, else_clause}
 				);
 				return E;
 			}
-			const condition = line_wo_prefix["elif".len..];
+
+			const condition = else_clause["if".len..];
 			try parser.validate(condition, input, linenr);
 		}
 		else if (a.startswith(line_wo_prefix, "end")) {
@@ -178,7 +194,7 @@ fn validate_input(self: *Self, gpa: Allocator, input: []const u8) !void {
 			a.errtag();
 			a.errln(
 				\\{s}, line {d}: Invalid keyword '{s}'!
-				\\Should be 'if', 'else', 'elif' or 'end'!
+				\\Should be 'if', 'else' or 'end'!
 				, .{input, linenr, first_word}
 			);
 			return E;
@@ -237,14 +253,14 @@ fn read_lines(
 		linenr += 1;
 	}) {
 		const line: []u8 = allocating.written();
-		const trimmed: []const u8 = a.trimleft(line, " \t");
+		const trimmed: []const u8 = a.trim_ws_left(line);
 
 		if (!a.startswith(trimmed, self.prefix)) {
 			if (write_line == .yes) try writer.interface.print("{s}\n", .{line});
 			continue;
 		}
 
-		const condition_line = a.trimleft(trimmed[self.prefix.len..], " \t");
+		const condition_line = a.trim_ws_left(trimmed[self.prefix.len..]);
 		if (a.startswith(condition_line, "if")) {
 			scope += 1;
 			if (write_line != .yes) {
@@ -257,16 +273,17 @@ fn read_lines(
 			};
 		}
 		else if (a.startswith(condition_line, "else")) {
-			write_line = if (write_line != .no) .ignore else .yes;
-		}
-		else if (a.startswith(condition_line, "elif")) {
+			if (std.mem.trimRight(u8, condition_line, " \t").len == "else".len) {
+				write_line = if (write_line != .no) .ignore else .yes;
+				continue;
+			}
 			write_line = switch (write_line) {
 				.yes, .ignore => .ignore,
-				else => switch (
-					parser.parse(condition_line["elif".len..], &self.macros)
-				) {
-					true => .yes,
-					false => .no
+				else => blk: {
+					const else_skipped = a.trim_ws_left(condition_line["else".len..]);
+					const condition = a.trim_ws_left(else_skipped["if".len..]);
+					const parse_true = parser.parse(condition, &self.macros);
+					break :blk if (parse_true) .yes else .no;
 				}
 			};
 		}

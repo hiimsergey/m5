@@ -3,7 +3,7 @@ const a = @import("alias.zig");
 const arguments = @import("arguments.zig");
 
 const Allocator = std.mem.Allocator;
-const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
+const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Processor = @import("Processor.zig");
 
 pub fn main() u8 {
@@ -17,11 +17,17 @@ fn real_main() !void {
 	const gpa = aw.allocator();
 
 	defer a.stdout.interface.flush() catch {};
-	errdefer a.stderr.interface.flush() catch {};
+	errdefer {
+		// Reset console output styling and flush
+		a.err("\x1b[0m", .{});
+		a.stderr.interface.flush() catch {};
+	}
 
 	const args = try std.process.argsAlloc(gpa);
 	defer std.process.argsFree(gpa, args);
 
+	// All arguments and input files are checked prior to catch error
+	// prematurely so that we only start processing when everything's right.
 	try arguments.validate(args);
 
 	var pp = try Processor.init(gpa);
