@@ -23,26 +23,26 @@ macros: StringHashMap([]const u8),
 prefix: []const u8,
 verbose: bool,
 
-pub fn init(allocator: Allocator) !Self {
+pub fn init(gpa: Allocator) !Self {
 	return .{
-		.inputs = try ArrayList([]const u8).initCapacity(allocator, 2),
-		.macros = StringHashMap([]const u8).init(allocator),
+		.inputs = try ArrayList([]const u8).initCapacity(gpa, 2),
+		.macros = StringHashMap([]const u8).init(gpa),
 		.prefix = "",
 		.verbose = false
 	};
 }
 
-pub fn deinit(self: *Self, allocator: Allocator) void {
-	self.inputs.deinit(allocator);
+pub fn deinit(self: *Self, gpa: Allocator) void {
+	self.inputs.deinit(gpa);
 	self.macros.deinit();
 }
 
-/// Interpret arguments, assuming they have a correct format, and preprocess
+/// Interpret arguments, assuming they have a correct format, and process
 /// all input files into their respective outputs.
-pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
+pub fn run(self: *Self, gpa: Allocator, args: [][:0]u8) !void {
 	var expecting = ExpectationStatus.nothing;
 
-	// Don't log anything if preprocessing to stdout to avoid mixing with the file
+	// Don't log anything if processing to stdout to avoid mixing with the file
 	// content.
 	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
 
@@ -59,7 +59,7 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 				var writer_buf: [1024]u8 = undefined;
 				var writer = file.writer(&writer_buf);
 
-				try self.preprocess(allocator, &writer);
+				try self.process(gpa, &writer);
 				self.inputs.clearRetainingCapacity();
 				expecting = .nothing;
 				continue;
@@ -88,16 +88,16 @@ pub fn run(self: *Self, allocator: Allocator, args: [][:0]u8) !void {
 		else if (arg[0] == '-') continue // gotta be the -v flag
 		else {
 			// Input file
-			try self.validate_input(allocator, arg);
-			try self.inputs.append(allocator, arg);
+			try self.validate_input(gpa, arg);
+			try self.inputs.append(gpa, arg);
 		}
 	}
 
-	if (self.inputs.items.len > 0) try self.preprocess(allocator, &a.stdout);
+	if (self.inputs.items.len > 0) try self.process(gpa, &a.stdout);
 }
 
 /// Check whether the input file lacks any m5 syntax errors.
-fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
+fn validate_input(self: *Self, gpa: Allocator, input: []const u8) !void {
 	var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
 		a.errtag();
 		a.errln("Could not open input file '{s}'!", .{input});
@@ -108,15 +108,15 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	var reader_buf: [1024]u8 = undefined;
 	var reader = file.reader(&reader_buf);
 
-	var allocating = Allocating.init(allocator);
+	var allocating = Allocating.init(gpa);
 	defer allocating.deinit();
 
 	var linenr: usize = 1;
 	var scope: usize = 0;
 
 	while (
-		reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
-	) |_| : ({
+		reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0
+	) : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(
 			@intFromBool(reader.interface.seek < reader.interface.end)
@@ -170,7 +170,6 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 			scope -= 1;
 		}
 		else {
-			// TODO FINAL TEST
 			const first_word = blk: {
 				const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
 					orelse line_wo_prefix.len;
@@ -192,7 +191,7 @@ fn validate_input(self: *Self, allocator: Allocator, input: []const u8) !void {
 	return E;
 }
 
-fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
+fn process(self: *Self, gpa: Allocator, writer: *File.Writer) !void {
 	for (self.inputs.items) |input| {
 		var file = try std.fs.cwd().openFile(input, .{ .mode = .read_only });
 		defer file.close();
@@ -200,12 +199,12 @@ fn preprocess(self: *Self, allocator: Allocator, writer: *File.Writer) !void {
 		var reader_buf: [1024]u8 = undefined;
 		var reader = file.reader(&reader_buf);
 
-		var allocating = Allocating.init(allocator);
+		var allocating = Allocating.init(gpa);
 		defer allocating.deinit();
 
 		try self.read_lines(&allocating, &reader, writer);
 		// TODO FINAL TEST
-		if (self.verbose) a.println("Preprocessed {s}!", .{input});
+		if (self.verbose) a.println("Processed {s}!", .{input});
 	}
 	try writer.interface.flush();
 }
@@ -229,8 +228,8 @@ fn read_lines(
 	var write_line: WriteLine = .yes;
 
 	while (
-		reader.interface.streamDelimiter(&allocating.writer, '\n') catch null
-	) |_| : ({
+		reader.interface.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0
+	) : ({
 		allocating.clearRetainingCapacity();
 		reader.interface.toss(
 			@intFromBool(reader.interface.seek < reader.interface.end)

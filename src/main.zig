@@ -4,7 +4,7 @@ const arguments = @import("arguments.zig");
 
 const Allocator = std.mem.Allocator;
 const AllocatorWrapper = @import("allocator.zig").AllocatorWrapper;
-const Preprocessor = @import("Preprocessor.zig");
+const Processor = @import("Processor.zig");
 
 pub fn main() u8 {
 	real_main() catch return 1;
@@ -14,20 +14,20 @@ pub fn main() u8 {
 fn real_main() !void {
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
-	const allocator = aw.allocator();
+	const gpa = aw.allocator();
 
 	defer a.stdout.interface.flush() catch {};
 	errdefer a.stderr.interface.flush() catch {};
 
-	const args = try std.process.argsAlloc(allocator);
-	defer std.process.argsFree(allocator, args);
+	const args = try std.process.argsAlloc(gpa);
+	defer std.process.argsFree(gpa, args);
 
 	try arguments.validate(args);
 
-	var pp = try Preprocessor.init(allocator);
-	defer pp.deinit(allocator);
+	var pp = try Processor.init(gpa);
+	defer pp.deinit(gpa);
 
-	try pp.run(allocator, args);
+	try pp.run(gpa, args);
 }
 
 // TODO "m5 elseX" should complain that elseX is an invalid keyword

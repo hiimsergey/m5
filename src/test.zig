@@ -70,11 +70,12 @@ const Command = struct {
 	}
 };
 
-test {
+test "Processing files normally" {
 	var file = try set_test_file(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
+		\\
 	);
 	defer file.close();
 
@@ -99,7 +100,7 @@ test {
 	try c4.expect_result(1, "");
 }
 
-test {
+test "Processing files without trailing newline" {
 	var file = try set_test_file(
 		\\m5 if ALICE
 		\\hi alice
@@ -119,10 +120,18 @@ test {
 	defer c2.deinit();
 	try c2.expect_result(0, "hi alice\n");
 
-	// TODO TEST putting -p at the very end
+	var c4 = try Command.init(&.{M5, TESTFILE, "-DALICE"});
+	defer c4.deinit();
+	try c4.expect_result(1, "");
 }
 
-test {
+test "Invalid if-block scoping" {
+	// TODO TEST missing if
+	// TODO TEST missing end
+	// TODO TEST too much end
+}
+
+test "Nested if-blocks" {
 	// TODO NOW
 	var file = try set_test_file(
 		\\m5 if ALICE
