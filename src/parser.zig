@@ -25,7 +25,7 @@ const ConditionSplit = struct {
 		if (self.expression.len == 0) return null;
 		self.expression = std.mem.trimLeft(u8, self.expression, " ");
 
-		if (self.expression[0] == '(') return self.end_bracket();
+		if (self.expression[0] == '(') return self.endBracket();
 
 		for (0..self.expression.len) |i| {
 			if (self.expression[i] == self.token) {
@@ -40,7 +40,7 @@ const ConditionSplit = struct {
 		return result;
 	}
 
-	fn end_bracket(self: *ConditionSplit) []const u8 {
+	fn endBracket(self: *ConditionSplit) []const u8 {
 		var scope: usize = 1;
 		for (1..self.expression.len) |i| switch (self.expression[i]) {
 			'(' => scope += 1,
@@ -75,7 +75,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 					state = .expecting_operator;
 
 					// TODO FINAL TEST
-					try check_overflow(cur_numeric_literal[0..i], input, linenr);
+					try checkOverflow(cur_numeric_literal[0..i], input, linenr);
 					cur_numeric_literal = "";
 				},
 				else => continue
@@ -111,7 +111,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 						return E;
 					},
 					.in_number => {
-						try check_overflow(cur_numeric_literal, input, linenr);
+						try checkOverflow(cur_numeric_literal, input, linenr);
 						cur_numeric_literal = "";
 					},
 					else => {
@@ -256,81 +256,81 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 }
 
 pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
-	return parse_or(condition, macros);
+	return parseOr(condition, macros);
 }
 
-fn parse_or(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
+fn parseOr(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	var result = false;
 	var iter = ConditionSplit.init(condition, '|');
 	
 	while (iter.next()) |slice| {
 		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
-			else parse_and(slice, macros);
+			else parseAnd(slice, macros);
 		result = result or parse_result;
 	}
 	return result;
 }
 
-fn parse_and(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
+fn parseAnd(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	var result = true;
 	var iter = ConditionSplit.init(condition, '&');
 
 	while (iter.next()) |slice| {
 		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
-			else parse_cmp(slice, macros);
+			else parseCmp(slice, macros);
 		result = result and parse_result;
 	}
 	return result;
 }
 
-fn parse_cmp(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
+fn parseCmp(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
+				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parsei(term_value(condition[i + 2..], macros)) catch 1;
+					const rhs = a.parsei(termValue(condition[i + 2..], macros)) catch 1;
 					return lhs >= rhs;
 				}
-				const rhs = a.parsei(term_value(condition[i + 1..], macros)) catch 1;
+				const rhs = a.parsei(termValue(condition[i + 1..], macros)) catch 1;
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
+				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parsei(term_value(condition[i + 2..], macros)) catch 1;
+					const rhs = a.parsei(termValue(condition[i + 2..], macros)) catch 1;
 					return lhs <= rhs;
 				}
-				const rhs = a.parsei(term_value(condition[i + 1..], macros)) catch 1;
+				const rhs = a.parsei(termValue(condition[i + 1..], macros)) catch 1;
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
-				const rhs = a.parsei(term_value(condition[i + 1..], macros)) catch 1;
+				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
+				const rhs = a.parsei(termValue(condition[i + 1..], macros)) catch 1;
 				return lhs == rhs;
 			},
 			'!' => {
-				const lhs = a.parsei(term_value(condition[0..i], macros)) catch 1;
-				const rhs = a.parsei(term_value(condition[i + 2..], macros)) catch 1;
+				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
+				const rhs = a.parsei(termValue(condition[i + 2..], macros)) catch 1;
 				return lhs != rhs;
 			},
 			else => continue
 		}
 	}
-	const value = term_value(condition, macros);
+	const value = termValue(condition, macros);
 	const numeric_value = a.parsei(value) catch 1;
 	return numeric_value > 0;
 }
 
-fn term_value(term: []const u8, macros: *const StringHashMap([]const u8)) []const u8 {
+fn termValue(term: []const u8, macros: *const StringHashMap([]const u8)) []const u8 {
 	const trim_nots = std.mem.trimLeft(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
 
-	const tmp_result = if (is_number(trimmed)) trimmed
+	const tmp_result = if (isNumber(trimmed)) trimmed
 		else macros.get(trimmed) orelse "0";
 	if (!negate) return tmp_result;
 
@@ -351,7 +351,7 @@ fn term_value(term: []const u8, macros: *const StringHashMap([]const u8)) []cons
 
 /// Return whether the given string could be successfully parsed into a number.
 /// Ignores underscore characters, just like `std.fmt.parseInt` does.
-fn is_number(buf: []const u8) bool {
+fn isNumber(buf: []const u8) bool {
 	for (buf) |c| switch (c) {
 		'0'...'9', '_' => continue,
 		else => return false
@@ -362,7 +362,7 @@ fn is_number(buf: []const u8) bool {
 /// Return an error if `buf` couldn't be parsed into a i32.
 /// `input` and `linenr` are just information about the string's position
 /// for a more helpful error message.
-fn check_overflow(buf: []const u8, input: []const u8, linenr: usize) !void {
+fn checkOverflow(buf: []const u8, input: []const u8, linenr: usize) !void {
 	_ = a.parsei(buf) catch {
 		a.errtag();
 		a.errln(

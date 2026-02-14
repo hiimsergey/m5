@@ -7,11 +7,11 @@ const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Processor = @import("Processor.zig");
 
 pub fn main() u8 {
-	real_main() catch return 1;
+	realMain() catch return 1;
 	return 0;
 }
 
-fn real_main() !void {
+fn realMain() !void {
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
 	const gpa = aw.allocator();
@@ -30,10 +30,10 @@ fn real_main() !void {
 	// prematurely so that we only start processing when everything's right.
 	try arguments.validate(args);
 
-	var pp = try Processor.init(gpa);
-	defer pp.deinit(gpa);
+	var procr = try Processor.init(gpa);
+	defer procr.deinit(gpa);
 
-	try pp.run(gpa, args);
+	try procr.run(gpa, args);
 }
 
 // TODO "m5 elseX" should complain that elseX is an invalid keyword

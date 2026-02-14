@@ -8,7 +8,7 @@ const Self = @This();
 
 const is_debug = builtin.mode == .Debug;
 
-dbg_state: if (is_debug) DebugAllocator else void,
+dbg_state: if (is_debug) DebugAllocator else void = {},
 
 /// Initialize Zig's `DebugAllocator`.
 pub fn init() Self {

@@ -19,7 +19,7 @@ fn validate(condition: []const u8) !void {
 
 /// Set `content` as the file content of the test file at `TESTFILE`
 /// and return a file handle.
-fn set_test_file(content: []const u8) !std.fs.File {
+fn setTestFile(content: []const u8) !std.fs.File {
 	var result = try std.fs.cwd().createFile(
 		TESTFILE,
 		.{ .read = true, .truncate = true }
@@ -64,14 +64,14 @@ const Command = struct {
 		self.stderr.deinit(gpa);
 	}
 	
-	fn expect_result(self: *const Command, ret: u8, cmp: []const u8) !void {
+	fn expectResult(self: *const Command, ret: u8, cmp: []const u8) !void {
 		try std.testing.expectEqual(ret, self.term.Exited);
 		try std.testing.expectEqualStrings(cmp, self.stdout.items);
 	}
 };
 
 test "Processing files normally" {
-	var file = try set_test_file(
+	var file = try setTestFile(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
@@ -81,27 +81,27 @@ test "Processing files normally" {
 
 	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
 	defer c0.deinit();
-	try c0.expect_result(0, "");
+	try c0.expectResult(0, "");
 
 	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
 	defer c1.deinit();
-	try c1.expect_result(0, "hi alice\n");
+	try c1.expectResult(0, "hi alice\n");
 
 	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
 	defer c2.deinit();
-	try c2.expect_result(0, "hi alice\n");
+	try c2.expectResult(0, "hi alice\n");
 
 	var c3 = try Command.init(&.{M5, TESTFILE, "-DALICE", "-p", "m5"});
 	defer c3.deinit();
-	try c3.expect_result(1, "");
+	try c3.expectResult(1, "");
 
 	var c4 = try Command.init(&.{M5, TESTFILE, "-DALICE"});
 	defer c4.deinit();
-	try c4.expect_result(1, "");
+	try c4.expectResult(1, "");
 }
 
 test "Processing files without trailing newline" {
-	var file = try set_test_file(
+	var file = try setTestFile(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
@@ -110,19 +110,19 @@ test "Processing files without trailing newline" {
 
 	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
 	defer c0.deinit();
-	try c0.expect_result(0, "");
+	try c0.expectResult(0, "");
 
 	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
 	defer c1.deinit();
-	try c1.expect_result(0, "hi alice\n");
+	try c1.expectResult(0, "hi alice\n");
 
 	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
 	defer c2.deinit();
-	try c2.expect_result(0, "hi alice\n");
+	try c2.expectResult(0, "hi alice\n");
 
 	var c4 = try Command.init(&.{M5, TESTFILE, "-DALICE"});
 	defer c4.deinit();
-	try c4.expect_result(1, "");
+	try c4.expectResult(1, "");
 }
 
 test "Invalid if-block scoping" {
@@ -140,7 +140,7 @@ test "Else keyword" {
 
 test "Nested if-blocks" {
 	// TODO NOW
-	var file = try set_test_file(
+	var file = try setTestFile(
 		\\m5 if ALICE
 		\\m5 if BOB
 		\\m5 end
@@ -151,7 +151,7 @@ test "Nested if-blocks" {
 }
 
 test {
-	var file = try set_test_file(
+	var file = try setTestFile(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
@@ -161,15 +161,15 @@ test {
 
 	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
 	defer c0.deinit();
-	try c0.expect_result(0, "");
+	try c0.expectResult(0, "");
 
 	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
 	defer c1.deinit();
-	try c1.expect_result(0, "hi alice\n");
+	try c1.expectResult(0, "hi alice\n");
 
 	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
 	defer c2.deinit();
-	try c2.expect_result(0, "hi alice\n");
+	try c2.expectResult(0, "hi alice\n");
 }
 
 test "Condition validation" {

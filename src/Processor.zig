@@ -15,7 +15,6 @@ const E = error.Generic;
 const ExpectationStatus = enum(u8) {nothing, output, prefix};
 const KV = struct { key: []const u8, value: []const u8 };
 const WriteLine = enum(u8) {no, yes, ignore};
-
 const Self = @This();
 
 inputs: ArrayList([]const u8),
@@ -44,7 +43,7 @@ pub fn run(self: *Self, gpa: Allocator, args: [][:0]u8) !void {
 
 	// Don't log anything if processing to stdout to avoid mixing with the file
 	// content.
-	self.verbose = a.contains_str(args, "-v") and a.contains_str(args, "-o");
+	self.verbose = a.containsStr(args, "-v") and a.containsStr(args, "-o");
 
 	for (args[1..]) |arg| {
 		switch (expecting) {
@@ -88,7 +87,7 @@ pub fn run(self: *Self, gpa: Allocator, args: [][:0]u8) !void {
 		else if (arg[0] == '-') continue // gotta be the -v flag
 		else {
 			// Input file
-			try self.validate_input(gpa, arg);
+			try self.validateInput(gpa, arg);
 			try self.inputs.append(gpa, arg);
 		}
 	}
@@ -97,7 +96,7 @@ pub fn run(self: *Self, gpa: Allocator, args: [][:0]u8) !void {
 }
 
 /// Check whether the input file lacks any m5 syntax errors.
-fn validate_input(self: *Self, gpa: Allocator, input: []const u8) !void {
+fn validateInput(self: *Self, gpa: Allocator, input: []const u8) !void {
 	var file = std.fs.cwd().openFile(input, .{ .mode = .read_only }) catch {
 		a.errtag();
 		a.errln("Could not open input file '{s}'!", .{input});
@@ -218,14 +217,14 @@ fn process(self: *Self, gpa: Allocator, writer: *File.Writer) !void {
 		var allocating = Allocating.init(gpa);
 		defer allocating.deinit();
 
-		try self.read_lines(&allocating, &reader, writer);
+		try self.interpretLines(&allocating, &reader, writer);
 		// TODO FINAL TEST
 		if (self.verbose) a.println("Processed {s}!", .{input});
 	}
 	try writer.interface.flush();
 }
 
-fn read_lines(
+fn interpretLines(
 	self: *Self, allocating: *Allocating,
 	reader: *File.Reader, writer: *File.Writer
 ) !void {

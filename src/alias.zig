@@ -7,7 +7,7 @@ var stdout_buf: [1024]u8 = undefined;
 pub var stdout = std.fs.File.stdout().writer(&stdout_buf);
 pub var stderr = std.fs.File.stderr().writer(&stderr_buf);
 
-pub fn contains_str(haystack: []const []const u8, needle: []const u8) bool {
+pub fn containsStr(haystack: []const []const u8, needle: []const u8) bool {
 	for (haystack) |hay| if (eql(hay, needle)) return true;
 	return false;
 }
@@ -20,7 +20,7 @@ pub fn startswith(a: []const u8, b: []const u8) bool {
 pub fn parsei(buf: []const u8) !i32 {
 	return std.fmt.parseInt(i32, buf, 10);
 }
-pub fn trim_ws_left(slice: []const u8) []const u8 {
+pub fn trimWsLeft(slice: []const u8) []const u8 {
 	return std.mem.trimLeft(u8, slice, " \t");
 }
 
@@ -36,7 +36,7 @@ pub fn err(comptime msg: []const u8, args: anytype) void {
 pub fn errtag() void {
 	_ = stderr.interface.write("\x1b[31merror: ") catch {};
 }
-pub fn print_help() void {
+pub fn printHelp() void {
 	println(
 		\\m5 - a simple text file processor
 		\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
