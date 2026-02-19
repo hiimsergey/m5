@@ -15,8 +15,8 @@ const correct_usage_text = "See 'm5 -h' for correct usage.";
 /// Check command line arguments for validity. That includes the correct argument syntax
 /// and the existence of the input files.
 pub fn validate(args: [][:0]u8) !void {
-	if (args.len == 1 or a.contains_str(args, "--help") or a.contains_str(args, "-h")) {
-		a.print_help();
+	if (args.len == 1 or a.containsStr(args, "--help") or a.containsStr(args, "-h")) {
+		a.printHelp();
 		return E;
 	}
 

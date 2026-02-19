@@ -1,5 +1,8 @@
 //! A module with function aliases (i.e. abstractions) and helper functions.
 
+// TODO fragment this file into where they are needed
+// RENAME to log.zig
+
 const std = @import("std");
 
 var stderr_buf: [1024]u8 = undefined;
@@ -24,9 +27,11 @@ pub fn trimWsLeft(slice: []const u8) []const u8 {
 	return std.mem.trimLeft(u8, slice, " \t");
 }
 
+// TODO REMOVE
 pub fn println(comptime fmt: []const u8, args: anytype) void {
 	stdout.interface.print(fmt ++ "\n", args) catch {};
 }
+// TODO REMOVE
 pub fn errln(comptime msg: []const u8, args: anytype) void {
 	stderr.interface.print(msg ++ "\n", args) catch {};
 }

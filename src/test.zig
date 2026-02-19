@@ -9,27 +9,31 @@ const parse = parser.parse;
 
 const gpa = std.testing.allocator;
 
-const M5 = "zig-out/bin/m5";
-const TESTFILE = ".zig-cache/test.txt";
-var buf: [1024]u8 = undefined;
+const m5 = "zig-out/bin/m5";
+const test_file_path = ".zig-cache/test.txt";
+var test_file: std.fs.File = undefined;
+var test_file_writer: std.fs.File.Writer = undefined;
+var test_file_writer_buf: [1024]u8 = undefined;
 
 fn validate(condition: []const u8) !void {
-	return parser.validate(condition, TESTFILE, 0);
+	return parser.validate(condition, test_file_path, 0);
 }
 
-/// Set `content` as the file content of the test file at `TESTFILE`
-/// and return a file handle.
-fn setTestFile(content: []const u8) !std.fs.File {
-	var result = try std.fs.cwd().createFile(
-		TESTFILE,
-		.{ .read = true, .truncate = true }
+/// Open file at `test_file_path` for writing.
+/// Must be closed with `test_file_path.close()`.
+fn openTestFile() !void {
+	test_file = try std.fs.cwd().createFile(
+		test_file_path,
+		.{ .read = true, .truncate = false }
 	);
+	test_file_writer = test_file.writer(&test_file_writer_buf);
+}
 
-	var writer = result.writer(&buf);
-	try writer.interface.writeAll(content);
-	try writer.interface.flush();
-
-	return result;
+/// Set `content` as the file content of the test file at `test_file_path`.
+fn setTestFile(content: []const u8) !void {
+	try test_file.setEndPos(0);
+	try test_file_writer.interface.writeAll(content);
+	try test_file_writer.interface.flush();
 }
 
 const Command = struct {
@@ -64,68 +68,96 @@ const Command = struct {
 		self.stderr.deinit(gpa);
 	}
 	
-	fn expectResult(self: *const Command, ret: u8, cmp: []const u8) !void {
+	fn expectResult(self: *const Command, ret: u8, stdout: []const u8) !void {
 		try std.testing.expectEqual(ret, self.term.Exited);
-		try std.testing.expectEqualStrings(cmp, self.stdout.items);
+		try std.testing.expectEqualStrings(stdout, self.stdout.items);
 	}
 };
 
 test "Processing files normally" {
-	var file = try setTestFile(
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
 		\\
 	);
-	defer file.close();
 
-	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "");
 
-	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(0, "hi alice\n");
 
-	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-DALICE"});
 	defer c2.deinit();
 	try c2.expectResult(0, "hi alice\n");
 
-	var c3 = try Command.init(&.{M5, TESTFILE, "-DALICE", "-p", "m5"});
+	var c3 = try Command.init(&.{m5, test_file_path, "-DALICE", "-p", "m5"});
 	defer c3.deinit();
 	try c3.expectResult(1, "");
 
-	var c4 = try Command.init(&.{M5, TESTFILE, "-DALICE"});
+	var c4 = try Command.init(&.{m5, test_file_path, "-DALICE"});
 	defer c4.deinit();
 	try c4.expectResult(1, "");
 }
 
 test "Processing files without trailing newline" {
-	var file = try setTestFile(
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
 	);
-	defer file.close();
 
-	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "");
 
-	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(0, "hi alice\n");
 
-	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-DALICE"});
 	defer c2.deinit();
 	try c2.expectResult(0, "hi alice\n");
 
-	var c4 = try Command.init(&.{M5, TESTFILE, "-DALICE"});
+	var c4 = try Command.init(&.{m5, test_file_path, "-DALICE"});
 	defer c4.deinit();
 	try c4.expectResult(1, "");
 }
 
 test "Invalid if-block scoping" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\foo bar
+		\\m5 else
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(1, "");
+
+	try setTestFile(
+		\\foo bar
+		\\m5 else
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c1 = try Command.init(&.{m5, "-p", "m5", test_file_path});
+	defer c1.deinit();
+	try c1.expectResult(1, "");
 	// TODO TEST missing if
 	// TODO TEST missing end
 	// TODO TEST too much end
@@ -139,35 +171,63 @@ test "Else keyword" {
 }
 
 test "Nested if-blocks" {
+	try openTestFile();
+	defer test_file.close();
+
+	const cmd = [_][]const u8{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path};
+
 	// TODO NOW
-	var file = try setTestFile(
+	try setTestFile(
 		\\m5 if ALICE
 		\\m5 if BOB
+		\\hi alice and bob
 		\\m5 end
 		\\m5 end
 		\\
 	);
-	defer file.close();
+
+	var c0 = try Command.init(&cmd);
+	defer c0.deinit();
+	try c0.expectResult(0, "hi alice and bob\n");
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\m5 if BOB
+		\\hi alice and bob
+		\\m5 end
+		\\
+	);
+
+	var c1 = try Command.init(&cmd);
+	defer c1.deinit();
+	try c1.expectResult(1, "");
+
+	// TODO NOW
+	// TODO TEST missing if
+	// TODO TEST missing end
+	// TODO TEST too much end
 }
 
 test {
-	var file = try setTestFile(
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
 		\\m5 if ALICE
 		\\hi alice
 		\\m5 end
 		\\
 	);
-	defer file.close();
 
-	var c0 = try Command.init(&.{M5, "-p", "m5", TESTFILE});
+	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "");
 
-	var c1 = try Command.init(&.{M5, "-p", "m5", "-DALICE", TESTFILE});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(0, "hi alice\n");
 
-	var c2 = try Command.init(&.{M5, "-p", "m5", TESTFILE, "-DALICE"});
+	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-DALICE"});
 	defer c2.deinit();
 	try c2.expectResult(0, "hi alice\n");
 }

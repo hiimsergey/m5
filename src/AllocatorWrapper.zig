@@ -6,13 +6,13 @@ const std = @import("std");
 const DebugAllocator = std.heap.DebugAllocator(.{});
 const Self = @This();
 
-const is_debug = builtin.mode == .Debug;
+dbg_state: if (is_debug) DebugAllocator else void,
 
-dbg_state: if (is_debug) DebugAllocator else void = {},
+const is_debug = builtin.mode == .Debug;
 
 /// Initialize Zig's `DebugAllocator`.
 pub fn init() Self {
-	return if (is_debug) .{ .dbg_state = DebugAllocator.init } else .{};
+	return if (is_debug) .{ .dbg_state = DebugAllocator.init } else .{ .dbg_state = {} };
 }
 
 /// Return the `DebugAllocator`'s allocator.

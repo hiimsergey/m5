@@ -36,6 +36,8 @@ fn realMain() !void {
 	try procr.run(gpa, args);
 }
 
+// TODO CHECK if m5 lines are also ignored in falsy branches
+// TODO give tests proper structure
 // TODO "m5 elseX" should complain that elseX is an invalid keyword
 // TODO FINAL COMMENT ALL
 // TODO FINAL CONSIDER replacing usize with u32 everywhere
@@ -52,3 +54,15 @@ fn realMain() !void {
 //     -o foo -o bar
 //     syntax error (with linenr)
 //     zig-out/bin/m5 -p m5 .zig-cache/tmp/fVS2W6qQrVVELE26/test.txt silently fails
+
+// TODO PLAN possible future release
+// m5 label name:label         - define label
+// m5 goto name:label          - jump to line n in input file 
+// m5 after name:label         - sets default label to jump after every single non-directive line
+//     (if no arg is given, handler is reset)
+// m5 resume                   - return to where you jumped here from with after
+// m5 back n:int               - delete n characters from output (allows inline generation)
+// m5 define name:str val:expr - define variable
+// m5 undef name:str           - delete variable
+//     (since undefinition equals value 0, maybe this is redundant)
+// m5 write content:expr       - writes the value of the expression to the output file
