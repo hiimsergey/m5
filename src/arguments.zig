@@ -1,5 +1,8 @@
+// TODO RENAME file to validate.zig
 const std = @import("std");
-const a = @import("alias.zig");
+const log = @import("log.zig");
+
+const stderr = log.stderr;
 
 const E = error.Generic;
 
@@ -10,13 +13,13 @@ pub const FlagState = enum(u8) {
 };
 
 const invalid_args_text = "Invalid args! ";
-const correct_usage_text = "See 'm5 -h' for correct usage.";
+const correct_usage_text = "See 'm5 -h' for correct usage.\n";
 
 /// Check command line arguments for validity. That includes the correct argument syntax
 /// and the existence of the input files.
 pub fn validate(args: [][:0]u8) !void {
-	if (args.len == 1 or a.containsStr(args, "--help") or a.containsStr(args, "-h")) {
-		a.printHelp();
+	if (args.len == 1 or containsString(args, "--help") or containsString(args, "-h")) {
+		stderr.print(log.help_text, .{}) catch {};
 		return E;
 	}
 
@@ -35,91 +38,128 @@ pub fn validate(args: [][:0]u8) !void {
 			continue;
 		}
 
-		if (a.eql(arg, "-o")) {
+		if (eql(arg, "-o")) {
 			if (!inputs_encountered) {
-				a.errtag();
-				a.err(invalid_args_text, .{});
-				a.errln("-o flag has no preceeding inputs!", .{});
-				a.errln(correct_usage_text, .{});
+				inline for (.{
+					log.error_tag,
+					invalid_args_text,
+					"-o flag has no preceeding inputs!\n",
+					correct_usage_text,
+					log.style_reset
+				}) |str| stderr.print(str, .{}) catch {};
 				return E;
 			}
 			if (i == args.len - 1) {
-				a.errtag();
-				a.err(invalid_args_text, .{});
-				a.errln("No output after -o flag.", .{});
-				a.errln(correct_usage_text, .{});
+				inline for (.{
+					log.error_tag,
+					invalid_args_text,
+					"No output after -o flag.\n",
+					correct_usage_text,
+					log.style_reset
+				}) |str| stderr.print(str, .{}) catch {};
 				return E;
 			}
 			o_state = .expecting_arg;
 		}
-		else if (a.eql(arg, "-p")) {
+		else if (eql(arg, "-p")) {
 			if (p_state != .not_encountered) {
-				a.errtag();
-				a.err(invalid_args_text, .{});
-				a.errln("Trying to pass a second -p flag.", .{});
-				a.errln(correct_usage_text, .{});
+				inline for (.{
+					log.error_tag,
+					invalid_args_text,
+					"Trying to pass a second -p flag.\n",
+					correct_usage_text,
+					log.style_reset
+				}) |str| stderr.print(str, .{}) catch {};
 				return E;
 			}
 			if (i == args.len - 1) {
-				a.errtag();
-				a.err(invalid_args_text, .{});
-				a.errln("No prefix after -p flag.", .{});
-				a.errln(correct_usage_text, .{});
+				inline for (.{
+					log.error_tag,
+					invalid_args_text,
+					"No prefix after -p flag.\n",
+					correct_usage_text,
+					log.style_reset
+				}) |str| stderr.print(str, .{}) catch {};
 				return E;
 			}
 			p_state = .expecting_arg;
 		}
-		else if (a.startswith(arg, "-D")) {
+		else if (startsWith(arg, "-D")) {
 			const definition = arg["-D".len..];
 			if (definition.len == 0) {
-				a.errtag();
-				a.err(invalid_args_text, .{});
-				a.errln("-D flag must follow a macro name with an optional value.", .{});
-				a.errln(correct_usage_text, .{});
+				inline for (.{
+					log.error_tag,
+					invalid_args_text,
+					"-D flag must follow a macro name with an optional value.",
+					correct_usage_text,
+					log.style_reset
+				}) |str| stderr.print(str, .{}) catch {};
 				return E;
 			}
 			switch (definition[0]) {
 				'-', '0'...'9' => {
-					a.errtag();
-					a.err(invalid_args_text, .{});
-					a.errln("You can't define a macro starting with a dash or a number!", .{});
-					a.errln(correct_usage_text, .{});
+					inline for (.{
+						log.error_tag,
+						invalid_args_text,
+						"You can't define a macro starting with a dash or a number!",
+						correct_usage_text,
+						log.style_reset
+					}) |str| stderr.print(str, .{}) catch {};
 					return E;
 				},
 				else => {}
 			}
 		}
-		else if (a.eql(arg, "-v")) continue
+		else if (eql(arg, "-v")) continue
 		else if (arg[0] == '-') {
-			a.errtag();
-			a.err(invalid_args_text, .{});
-			a.errln(
+			inline for (.{
+				log.error_tag,
+				invalid_args_text,
 				\\Non-existent flag given, i.e. one that's none out of these:
 				\\  -D, -h, -o, -p, -v
-				, .{}
-			);
-			a.errln(correct_usage_text, .{});
+				\\
+				, correct_usage_text,
+				log.style_reset
+			}) |str| stderr.print(str, .{}) catch {};
 			return E;
 		}
 		else {
 			std.debug.assert(p_state != .expecting_arg);
 			if (p_state != .arg_encountered) {
-				a.errtag();
-				a.errln(
+				stderr.print(log.error_tag, .{}) catch {};
+				stderr.print(invalid_args_text, .{}) catch {};
+				stderr.print(
 					\\No prefix given for input '{s}'!
 					\\You can pass a prefix with the -p flag!
-					, .{arg}
-				);
+					\\
+				, .{args[i]}) catch {};
+				stderr.print(correct_usage_text, .{}) catch {};
+				stderr.print(log.style_reset, .{}) catch {};
 				return E;
 			}
 
+			// TODO REMOVE
+			// this is redundant since `validateInput`
 			_ = std.fs.cwd().statFile(arg) catch {
-				a.errtag();
-				a.errln("Could not open input file '{s}'!", .{arg});
+				log.err("Could not open input file '{s}'!", .{arg});
 				return E;
 			};
 			// TOOD NOW CONSIDER MOVE validate_input() here
 			inputs_encountered = true;
 		}
 	}
+}
+
+pub fn startsWith(haystack: []const u8, needle: []const u8) bool {
+	return std.mem.startsWith(u8, haystack, needle);
+}
+
+pub fn eql(a: []const u8, b: []const u8) bool {
+	return std.mem.eql(u8, a, b);
+}
+
+/// Return whether `haystack` contains an element equal to `needle`.
+pub fn containsString(haystack: []const []const u8, needle: []const u8) bool {
+	for (haystack) |hay| if (eql(hay, needle)) return true;
+	return false;
 }

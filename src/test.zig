@@ -314,3 +314,8 @@ test "Condition parsing: Comparing" {
 	try map.put("B", "0");
 	try expect(parse("A != B", &map));
 }
+
+// TODO PLAN new test structure
+// condition parsing
+// cli parsing
+// (just go through every error message)

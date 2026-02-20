@@ -1,5 +1,5 @@
 const std = @import("std");
-const a = @import("alias.zig");
+const log = @import("log.zig");
 
 const StringHashMap = std.StringHashMap;
 
@@ -23,7 +23,7 @@ const ConditionSplit = struct {
 
 	pub fn next(self: *ConditionSplit) ?[]const u8 {
 		if (self.expression.len == 0) return null;
-		self.expression = std.mem.trimLeft(u8, self.expression, " ");
+		self.expression = std.mem.trimStart(u8, self.expression, " ");
 
 		if (self.expression[0] == '(') return self.endBracket();
 
@@ -83,9 +83,8 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'(' => switch (state) {
 				.expecting_expression => scope += 1,
 				else => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Expected expression, got '(' !",
+					log.err(
+						"{s}, line {d}: Expected expression, got '(' !\n",
 						.{input, linenr}
 					);
 					return E;
@@ -94,18 +93,16 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			')' => {
 				//if (scope == 0 or (state != .in_expression and state != .in_number)) {
 				if (scope == 0) {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Unexpected ')' without opening bracket!",
+					log.err(
+						"{s}, line {d}: Unexpected ')' without opening bracket!\n",
 						.{input, linenr}
 					);
 					return E;
 				}
 				switch (state) {
 					.expecting_expression => {
-						a.errtag();
-						a.errln(
-							"{s}, line {d}: Expected expression, got ')' !",
+						log.err(
+							"{s}, line {d}: Expected expression, got ')' !\n",
 							.{input, linenr}
 						);
 						return E;
@@ -127,9 +124,8 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'-' => switch (state) {
 				.expecting_expression => state = .in_number,
 				else => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: invalid character '-' !",
+					log.err(
+						"{s}, line {d}: invalid character '-' !\n",
 						.{input, linenr}
 					);
 					return E;
@@ -142,9 +138,8 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				},
 				.in_expression, .in_number => continue,
 				.expecting_operator => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Expected operator, got number!",
+					log.err(
+						"{s}, line {d}: Expected operator, got number!\n",
 						.{input, linenr}
 					);
 					return E;
@@ -154,17 +149,15 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.in_expression => continue,
 				.expecting_expression => state = .in_expression,
 				.in_number => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Unexpected letter '{}' in number!",
+					log.err(
+						"{s}, line {d}: Unexpected letter '{}' in number!\n",
 						.{input, linenr, condition[i]}
 					);
 					return E;
 				},
 				.expecting_operator => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Expected operator, got '{}' !",
+					log.err(
+						"{s}, line {d}: Expected operator, got '{}' !\n",
 						.{input, linenr, condition[i]}
 					);
 					return E;
@@ -174,9 +167,8 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.in_expression, .in_number => continue,
 				.expecting_expression => state = .in_expression,
 				.expecting_operator => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Expected operator, got '_' !",
+					log.err(
+						"{s}, line {d}: Expected operator, got '_' !\n",
 						.{input, linenr}
 					);
 					return E;
@@ -185,9 +177,8 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			},
 			'&', '|', '=' => switch (state) {
 				.expecting_expression => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Expected expression, got operator '{}' !",
+					log.err(
+						"{s}, line {d}: Expected expression, got operator '{}' !\n",
 						.{input, linenr, condition[i]}
 					);
 					return E;
@@ -197,10 +188,9 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'<', '>' => {
 				switch (state) {
 					.expecting_expression => {
-						a.errtag();
-						a.errln(
+						log.err(
 							"{s}, line {d}: Expected expression, " ++
-							"got comparison operator '{}' !",
+							"got comparison operator '{}' !\n",
 							.{input, linenr, condition[i]}
 						);
 						return E;
@@ -212,18 +202,16 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'!' => switch (state) {
 				.expecting_expression => continue,
 				.in_expression, .in_number => {
-					a.errtag();
-					a.errln(
-						"{s}, line {d}: Unexpected '!' in number!",
+					log.err(
+						"{s}, line {d}: Unexpected '!' in number!\n",
 						.{input, linenr}
 					);
 					return E;
 				},
 				.expecting_operator => {
 					if (i == condition.len - 1 or condition[i + 1] != '=') {
-						a.errtag();
-						a.errln(
-							"{s}, line {d}: Expected operator, found '!' !",
+						log.err(
+							"{s}, line {d}: Expected operator, found '!' !\n",
 							.{input, linenr}
 						);
 						return E;
@@ -233,9 +221,8 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				}
 			},
 			else => {
-				a.errtag();
-				a.errln(
-					"{s}, line {d}: Expected operator, found '!' !",
+				log.err(
+					"{s}, line {d}: Expected operator, found '!' !\n",
 					.{input, linenr}
 				);
 				return E;
@@ -245,14 +232,12 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 
 	// TODO NOW in order for trailing ) to work
 	//if (scope > 0 or (state != .in_expression and state != .in_number)) {
-	if (scope > 0 or state == .expecting_expression) {
-		a.errtag();
-		a.errln(
-			"{s}, line {d}: Expected operator, found '!' !",
-			.{input, linenr}
-		);
-		return E;
-	}
+	if (scope == 0 and state != .expecting_expression) return;
+	log.err(
+		"{s}, line {d}: Expected operator, found '!' !\n",
+		.{input, linenr}
+	);
+	return E;
 }
 
 pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
@@ -287,45 +272,45 @@ fn parseCmp(condition: []const u8, macros: *const StringHashMap([]const u8)) boo
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
+				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parsei(termValue(condition[i + 2..], macros)) catch 1;
+					const rhs = parseU32(termValue(condition[i + 2..], macros)) catch 1;
 					return lhs >= rhs;
 				}
-				const rhs = a.parsei(termValue(condition[i + 1..], macros)) catch 1;
+				const rhs = parseU32(termValue(condition[i + 1..], macros)) catch 1;
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
+				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
 
 				if (condition[i + 1] == '=') {
-					const rhs = a.parsei(termValue(condition[i + 2..], macros)) catch 1;
+					const rhs = parseU32(termValue(condition[i + 2..], macros)) catch 1;
 					return lhs <= rhs;
 				}
-				const rhs = a.parsei(termValue(condition[i + 1..], macros)) catch 1;
+				const rhs = parseU32(termValue(condition[i + 1..], macros)) catch 1;
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
-				const rhs = a.parsei(termValue(condition[i + 1..], macros)) catch 1;
+				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
+				const rhs = parseU32(termValue(condition[i + 1..], macros)) catch 1;
 				return lhs == rhs;
 			},
 			'!' => {
-				const lhs = a.parsei(termValue(condition[0..i], macros)) catch 1;
-				const rhs = a.parsei(termValue(condition[i + 2..], macros)) catch 1;
+				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
+				const rhs = parseU32(termValue(condition[i + 2..], macros)) catch 1;
 				return lhs != rhs;
 			},
 			else => continue
 		}
 	}
 	const value = termValue(condition, macros);
-	const numeric_value = a.parsei(value) catch 1;
+	const numeric_value = parseU32(value) catch 1;
 	return numeric_value > 0;
 }
 
 fn termValue(term: []const u8, macros: *const StringHashMap([]const u8)) []const u8 {
-	const trim_nots = std.mem.trimLeft(u8, term, "!");
+	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
@@ -334,9 +319,9 @@ fn termValue(term: []const u8, macros: *const StringHashMap([]const u8)) []const
 		else macros.get(trimmed) orelse "0";
 	if (!negate) return tmp_result;
 
-	const literal_value = a.parsei(trimmed) catch {
+	const literal_value = parseU32(trimmed) catch {
 		const macro_value = macros.get(trimmed) orelse return "";
-		const macro_literal_value = a.parsei(macro_value) catch
+		const macro_literal_value = parseU32(macro_value) catch
 			return "0";
 		return switch (macro_literal_value) {
 			0 => "",
@@ -363,13 +348,16 @@ fn isNumber(buf: []const u8) bool {
 /// `input` and `linenr` are just information about the string's position
 /// for a more helpful error message.
 fn checkOverflow(buf: []const u8, input: []const u8, linenr: usize) !void {
-	_ = a.parsei(buf) catch {
-		a.errtag();
-		a.errln(
+	_ = parseU32(buf) catch {
+		log.err(
 			"{s}, line {d}: " ++
-			"The absolute value of {s} is too big to represent!",
+			"The absolute value of {s} is too big to represent!\n",
 			.{input, linenr, buf}
 		);
 		return E;
 	};
+}
+
+fn parseU32(buf: []const u8) !u32 {
+	return try std.fmt.parseInt(u32, buf, 10);
 }

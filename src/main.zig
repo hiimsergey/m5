@@ -1,6 +1,6 @@
 const std = @import("std");
-const a = @import("alias.zig");
 const arguments = @import("arguments.zig");
+const log = @import("log.zig");
 
 const Allocator = std.mem.Allocator;
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
@@ -16,17 +16,13 @@ fn realMain() !void {
 	defer aw.deinit();
 	const gpa = aw.allocator();
 
-	defer a.stdout.interface.flush() catch {};
-	errdefer {
-		// Reset console output styling and flush
-		a.err("\x1b[0m", .{});
-		a.stderr.interface.flush() catch {};
-	}
+	defer log.stdout.flush() catch {};
+	errdefer log.stderr.flush() catch {};
 
 	const args = try std.process.argsAlloc(gpa);
 	defer std.process.argsFree(gpa, args);
 
-	// All arguments and input files are checked prior to catch error
+	// All arguments and input files are checked prior to catch errors
 	// prematurely so that we only start processing when everything's right.
 	try arguments.validate(args);
 
@@ -34,6 +30,10 @@ fn realMain() !void {
 	defer procr.deinit(gpa);
 
 	try procr.run(gpa, args);
+}
+
+test {
+	_ = @import("test.zig");
 }
 
 // TODO CHECK if m5 lines are also ignored in falsy branches
