@@ -150,14 +150,14 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.expecting_expression => state = .in_expression,
 				.in_number => {
 					log.err(
-						"{s}, line {d}: Unexpected letter '{}' in number!\n",
+						"{s}, line {d}: Unexpected letter '{c}' in number!\n",
 						.{input, linenr, condition[i]}
 					);
 					return E;
 				},
 				.expecting_operator => {
 					log.err(
-						"{s}, line {d}: Expected operator, got '{}' !\n",
+						"{s}, line {d}: Expected operator, got '{c}' !\n",
 						.{input, linenr, condition[i]}
 					);
 					return E;
@@ -178,7 +178,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			'&', '|', '=' => switch (state) {
 				.expecting_expression => {
 					log.err(
-						"{s}, line {d}: Expected expression, got operator '{}' !\n",
+						"{s}, line {d}: Expected expression, got operator '{c}' !\n",
 						.{input, linenr, condition[i]}
 					);
 					return E;
@@ -190,7 +190,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 					.expecting_expression => {
 						log.err(
 							"{s}, line {d}: Expected expression, " ++
-							"got comparison operator '{}' !\n",
+							"got comparison operator '{c}' !\n",
 							.{input, linenr, condition[i]}
 						);
 						return E;
@@ -211,7 +211,7 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 				.expecting_operator => {
 					if (i == condition.len - 1 or condition[i + 1] != '=') {
 						log.err(
-							"{s}, line {d}: Expected operator, found '!' !\n",
+							"{s}, line {d}: Expected operator, got '!' !\n",
 							.{input, linenr}
 						);
 						return E;
@@ -222,22 +222,22 @@ pub fn validate(condition: []const u8, input: []const u8, linenr: usize) !void {
 			},
 			else => {
 				log.err(
-					"{s}, line {d}: Expected operator, found '!' !\n",
-					.{input, linenr}
+					"{s}, line {d}: Unexpected character '{c}' !\n",
+					.{input, linenr, condition[i]}
 				);
 				return E;
 			}
 		}
 	}
 
-	// TODO NOW in order for trailing ) to work
-	//if (scope > 0 or (state != .in_expression and state != .in_number)) {
-	if (scope == 0 and state != .expecting_expression) return;
-	log.err(
-		"{s}, line {d}: Expected operator, found '!' !\n",
-		.{input, linenr}
-	);
-	return E;
+	if (scope > 0) {
+		log.err("{s}, line {d}: Unclosed parenthesis!\n", .{input, linenr});
+		return E;
+	}
+	if (state == .expecting_expression) {
+		log.err("{s}, line {d}: Expecting expression at the end!\n", .{input, linenr});
+		return E;
+	}
 }
 
 pub fn parse(condition: []const u8, macros: *const StringHashMap([]const u8)) bool {
@@ -321,8 +321,7 @@ fn termValue(term: []const u8, macros: *const StringHashMap([]const u8)) []const
 
 	const literal_value = parseU32(trimmed) catch {
 		const macro_value = macros.get(trimmed) orelse return "";
-		const macro_literal_value = parseU32(macro_value) catch
-			return "0";
+		const macro_literal_value = parseU32(macro_value) catch return "0";
 		return switch (macro_literal_value) {
 			0 => "",
 			else => "0"
@@ -334,7 +333,7 @@ fn termValue(term: []const u8, macros: *const StringHashMap([]const u8)) []const
 	};
 }
 
-/// Return whether the given string could be successfully parsed into a number.
+/// Return whether given string could be successfully parsed into a number.
 /// Ignores underscore characters, just like `std.fmt.parseInt` does.
 fn isNumber(buf: []const u8) bool {
 	for (buf) |c| switch (c) {
@@ -344,14 +343,15 @@ fn isNumber(buf: []const u8) bool {
 	return true;
 }
 
-/// Return an error if `buf` couldn't be parsed into a i32.
+/// Return an error if `buf` couldn't be parsed into an i32.
 /// `input` and `linenr` are just information about the string's position
 /// for a more helpful error message.
+/// Logs on error.
 fn checkOverflow(buf: []const u8, input: []const u8, linenr: usize) !void {
 	_ = parseU32(buf) catch {
 		log.err(
 			"{s}, line {d}: " ++
-			"The absolute value of {s} is too big to represent!\n",
+			"The absolute value of '{s}' is too big to represent!\n",
 			.{input, linenr, buf}
 		);
 		return E;

@@ -13,7 +13,7 @@ const stdout = log.stdout;
 
 const E = error.Generic;
 
-// Token messaging what kind of argument is expected next
+/// Token messaging what kind of argument is expected next
 const ExpectationStatus = enum(u8) {nothing, output, prefix};
 const KV = struct { key: []const u8, value: []const u8 };
 const WriteLine = enum(u8) {no, yes, ignore};
@@ -23,6 +23,16 @@ inputs: ArrayList([]const u8),
 macros: StringHashMap([]const u8),
 prefix: []const u8,
 verbose: bool,
+
+const Keyword = enum(u8) {@"if", @"else", end};
+
+const keyword_map = std.StaticStringMap(Keyword).initComptime(blk: {
+	const info = @typeInfo(Keyword).@"enum";
+	var result: [info.fields.len]struct{ []const u8, Keyword } = undefined;
+	for (info.fields, 0..) |field, i|
+		result[i] = .{ field.name, @as(Keyword, @enumFromInt(field.value)) };
+	break :blk result;
+});
 
 pub fn init(gpa: Allocator) !Self {
 	return .{
@@ -57,9 +67,9 @@ pub fn run(self: *Self, gpa: Allocator, args: [][:0]u8) !void {
 				defer file.close();
 
 				var writer_buf: [1024]u8 = undefined;
-				var writer = file.writer(&writer_buf);
+				var writer_wrapper = file.writer(&writer_buf);
 
-				try self.process(gpa, &writer.interface);
+				try self.process(gpa, &writer_wrapper.interface);
 				self.inputs.clearRetainingCapacity();
 				expecting = .nothing;
 				continue;
@@ -105,8 +115,8 @@ fn validateInput(self: *Self, gpa: Allocator, input: []const u8) !void {
 	defer file.close();
 
 	var reader_buf: [1024]u8 = undefined;
-	var file_reader = file.reader(&reader_buf);
-	const reader = &file_reader.interface;
+	var reader_wrapper = file.reader(&reader_buf);
+	const reader = &reader_wrapper.interface;
 
 	var allocating = Allocating.init(gpa);
 	defer allocating.deinit();
@@ -120,90 +130,82 @@ fn validateInput(self: *Self, gpa: Allocator, input: []const u8) !void {
 		reader.toss(@intFromBool(reader.seek < reader.end));
 		linenr += 1;
 	}) {
-		const line = allocating.written();
-		if (!startsWith(line, self.prefix)) continue;
-
-		const line_wo_prefix = blk: {
-			const wo_leading_whitespace = trimWsStart(line);
-			const prefix_skipped = wo_leading_whitespace[self.prefix.len..];
+		const cmd = blk: {
+			const line = allocating.written();
+			const line_wo_whitespace = trimWsStart(line);
+			if (!startsWith(line, self.prefix)) continue;
+			const prefix_skipped = line_wo_whitespace[self.prefix.len..];
 			break :blk trimWsStart(prefix_skipped);
 		};
-		if (startsWith(line_wo_prefix, "if")) {
-			scope += 1;
-			const condition = line_wo_prefix["if".len..];
-			try parser.validate(condition, input, linenr);
-		}
-		// TODO NOW this is both lowk inefficient and results in an proper errmsg
-		// with lines like "m5 else          X         "
-		else if (startsWith(line_wo_prefix, "else")) {
-			if (std.mem.trimRight(u8, line_wo_prefix, " \t").len == "else".len) {
-				// else is solitary.
-				continue;
-			}
 
-			const space_i = std.mem.indexOf(u8, line_wo_prefix, " \t") orelse {
-				// Line is a single word starting with "else".
-				log.err(
-					\\{s}, line {d}: Invalid keyword '{s}'!
-					\\Should be 'if', 'else' or 'end'!
-					\\
-					, .{input, linenr, line_wo_prefix}
-				);
-				return E;
-			};
+		var iter = std.mem.tokenizeAny(u8, cmd, " \t");
 
-			// Line's first word is definitely "else".
-			if (scope == 0) {
-				log.err(
-					"{s}, line {d}: There can be no else without an if clause prior!\n",
-					.{input, linenr}
-				);
-				return E;
-			}
-			
-			const else_clause = trimWsStart(line_wo_prefix[space_i..]);
-			if (!startsWith(else_clause, "if")) {
-				// Line's next word is not "if".
-				log.err(
-					"{s}, line {d}: Expected 'else if <condition>', " ++
-					"got invalid sequence 'else {s}'!\n",
-					.{input, linenr, else_clause}
-				);
-				return E;
-			}
-
-			const condition = else_clause["if".len..];
-			try parser.validate(condition, input, linenr);
-		}
-		else if (startsWith(line_wo_prefix, "end")) {
-			if (scope == 0) {
-				log.err(
-					"{s}, line {d}: There can be no end without an if clause prior!\n",
-					.{input, linenr}
-				);
-				return E;
-			}
-			scope -= 1;
-		}
-		else {
-			const first_word = blk: {
-				const space_i = std.mem.indexOfScalar(u8, line_wo_prefix, ' ')
-					orelse line_wo_prefix.len;
-				break :blk line_wo_prefix[0..space_i];
-			};
+		const keyword = iter.next() orelse {
+			// TOOD MOVE "X, line Y" to own string
+			log.err("{s}, line {d}: Empty directive!\n", .{input, linenr});
+			return E;
+		};
+		const keyword_arm = keyword_map.get(keyword) orelse {
 			log.err(
 				\\{s}, line {d}: Invalid keyword '{s}'!
 				\\Should be 'if', 'else' or 'end'!
 				\\
-				, .{input, linenr, first_word}
+				, .{input, linenr, keyword}
 			);
 			return E;
+		};
+
+		switch (keyword_arm) {
+			.@"if" => {
+				scope += 1;
+				const condition = cmd[iter.index..];
+				try parser.validate(condition, input, linenr);
+			},
+			.@"else" => {
+				// Line's first word is definitely "else".
+				if (scope == 0) {
+					log.err(
+						"{s}, line {d}: There can be no else without an if clause prior!\n",
+						.{input, linenr}
+					);
+					return E;
+				}
+
+				const subkeyword = iter.next() orelse {
+					// else is solitary.
+					continue;
+				};
+
+				if (!eql(subkeyword, "if")) {
+					// Line's next word is not "if".
+					log.err(
+						"{s}, line {d}: Expected 'else if <condition>', " ++
+						"got invalid sequence 'else {s} {s}'!\n",
+						.{input, linenr, subkeyword, cmd[iter.index..]}
+					);
+					return E;
+				}
+
+				const condition = cmd[iter.index..];
+				try parser.validate(condition, input, linenr);
+			},
+			.end => {
+				if (scope == 0) {
+					log.err(
+						"{s}, line {d}: There can be no end without an if clause prior!\n",
+						.{input, linenr}
+					);
+					return E;
+				}
+				scope -= 1;
+			}
 		}
 	}
 
-	if (scope == 0) return;
-	log.err("{s}, line {d}: If clause lacks end keyword!\n", .{input, linenr});
-	return E;
+	if (scope > 0) {
+		log.err("{s}, line {d}: If clause lacks end keyword!\n", .{input, linenr});
+		return E;
+	}
 }
 
 fn process(self: *Self, gpa: Allocator, writer: *std.Io.Writer) !void {
@@ -251,6 +253,9 @@ fn processLines(
 		); // skip newline but not when the file doesn't end with one
 		linenr += 1;
 	}) {
+		// TODO optimize this logic akin to the validation code
+		// 1. variable naming
+		// 2. stringmap
 		const line: []u8 = allocating.written();
 		const trimmed: []const u8 = trimWsStart(line);
 

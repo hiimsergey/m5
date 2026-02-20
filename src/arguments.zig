@@ -62,16 +62,6 @@ pub fn validate(args: [][:0]u8) !void {
 			o_state = .expecting_arg;
 		}
 		else if (eql(arg, "-p")) {
-			if (p_state != .not_encountered) {
-				inline for (.{
-					log.error_tag,
-					invalid_args_text,
-					"Trying to pass a second -p flag.\n",
-					correct_usage_text,
-					log.style_reset
-				}) |str| stderr.print(str, .{}) catch {};
-				return E;
-			}
 			if (i == args.len - 1) {
 				inline for (.{
 					log.error_tag,
@@ -85,12 +75,13 @@ pub fn validate(args: [][:0]u8) !void {
 			p_state = .expecting_arg;
 		}
 		else if (startsWith(arg, "-D")) {
+			// TODO handle string defines like -Dfoo="bar baz"
 			const definition = arg["-D".len..];
 			if (definition.len == 0) {
 				inline for (.{
 					log.error_tag,
 					invalid_args_text,
-					"-D flag must follow a macro name with an optional value.",
+					"-D flag must follow a macro name with an optional value.\n",
 					correct_usage_text,
 					log.style_reset
 				}) |str| stderr.print(str, .{}) catch {};
@@ -101,7 +92,7 @@ pub fn validate(args: [][:0]u8) !void {
 					inline for (.{
 						log.error_tag,
 						invalid_args_text,
-						"You can't define a macro starting with a dash or a number!",
+						"You can't define a macro starting with a number!\n",
 						correct_usage_text,
 						log.style_reset
 					}) |str| stderr.print(str, .{}) catch {};
@@ -124,7 +115,6 @@ pub fn validate(args: [][:0]u8) !void {
 			return E;
 		}
 		else {
-			std.debug.assert(p_state != .expecting_arg);
 			if (p_state != .arg_encountered) {
 				stderr.print(log.error_tag, .{}) catch {};
 				stderr.print(invalid_args_text, .{}) catch {};
@@ -141,7 +131,7 @@ pub fn validate(args: [][:0]u8) !void {
 			// TODO REMOVE
 			// this is redundant since `validateInput`
 			_ = std.fs.cwd().statFile(arg) catch {
-				log.err("Could not open input file '{s}'!", .{arg});
+				log.err("Could not open input file '{s}'!\n", .{arg});
 				return E;
 			};
 			// TOOD NOW CONSIDER MOVE validate_input() here

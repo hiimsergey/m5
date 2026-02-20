@@ -317,5 +317,43 @@ test "Condition parsing: Comparing" {
 
 // TODO PLAN new test structure
 // condition parsing
+//     parsing variables
+//     parsing numbers
+//         with _
+//         with -
+//         error on leading +
+//         misplaced (
+//         unopened )
+//         misplaced )
+//         misplaced -
+//         number instead of operator
+//         letter amidst number
+//         ! amidst number
+//         char instead of operator
+//         _ instead of operator
+//         operator instead of expression
+//         cmp operator instead of expression
+//         ! instead of operator
+//         random character
+//         unclosed parenthesis
+//         expecting expression at end
+// line parsing
+//     nested m5 lines
+//     invalid keyword
+//     else without if
+//     end without if
+//     if without end
+//     else if without end
+//     else if invalidsequence
+//     empty cmd
 // cli parsing
+//     couldnt open input file
+//     -o without inputs
+//     -o without outputs
+//     -p without prefix
+//     -D without define
+//     -D-123
+//     -D123
+//     random flag
+//     input without prefix
 // (just go through every error message)
