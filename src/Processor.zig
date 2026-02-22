@@ -13,9 +13,10 @@ const stdout = log.stdout;
 
 const E = error.Generic;
 
-/// Token messaging what kind of argument is expected next
+/// Used by `run` to indicate what kind of CLI argument parser expects next
 const ExpectationStatus = enum(u8) {nothing, output, prefix};
 const KV = struct { key: []const u8, value: []const u8 };
+/// Used by `processLines` to indicate whether next line should be written to output
 const WriteLine = enum(u8) {no, yes, ignore};
 const Self = @This();
 
@@ -27,9 +28,9 @@ verbose: bool,
 const Keyword = enum(u8) {@"if", @"else", end};
 
 const keyword_map = std.StaticStringMap(Keyword).initComptime(blk: {
-	const info = @typeInfo(Keyword).@"enum";
-	var result: [info.fields.len]struct{ []const u8, Keyword } = undefined;
-	for (info.fields, 0..) |field, i|
+	const fields = @typeInfo(Keyword).@"enum".fields;
+	var result: [fields.len]struct{ []const u8, Keyword } = undefined;
+	for (fields, 0..) |field, i|
 		result[i] = .{ field.name, @as(Keyword, @enumFromInt(field.value)) };
 	break :blk result;
 });
@@ -126,16 +127,15 @@ fn validateInput(self: *Self, gpa: Allocator, input: []const u8) !void {
 
 	while (reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
 		allocating.clearRetainingCapacity();
-		// Skip newline but not when the file doesn't end with one
+		// Skip newline but not if file doesn't end with one.
 		reader.toss(@intFromBool(reader.seek < reader.end));
 		linenr += 1;
 	}) {
 		const cmd = blk: {
 			const line = allocating.written();
 			const line_wo_whitespace = trimWsStart(line);
-			if (!startsWith(line, self.prefix)) continue;
-			const prefix_skipped = line_wo_whitespace[self.prefix.len..];
-			break :blk trimWsStart(prefix_skipped);
+			if (!startsWith(line_wo_whitespace, self.prefix)) continue;
+			break :blk line_wo_whitespace[self.prefix.len..];
 		};
 
 		var iter = std.mem.tokenizeAny(u8, cmd, " \t");
@@ -165,7 +165,8 @@ fn validateInput(self: *Self, gpa: Allocator, input: []const u8) !void {
 				// Line's first word is definitely "else".
 				if (scope == 0) {
 					log.err(
-						"{s}, line {d}: There can be no else without an if clause prior!\n",
+						"{s}, line {d}: " ++
+						"There can be no else without an if clause prior!\n",
 						.{input, linenr}
 					);
 					return E;
@@ -192,7 +193,8 @@ fn validateInput(self: *Self, gpa: Allocator, input: []const u8) !void {
 			.end => {
 				if (scope == 0) {
 					log.err(
-						"{s}, line {d}: There can be no end without an if clause prior!\n",
+						"{s}, line {d}: " ++
+						"There can be no end without an if clause prior!\n",
 						.{input, linenr}
 					);
 					return E;
@@ -244,55 +246,56 @@ fn processLines(
 	var ignore_scopes: usize = 0;
 	var write_line: WriteLine = .yes;
 
-	while (
-		reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0
-	) : ({
+	while (reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
 		allocating.clearRetainingCapacity();
-		reader.toss(
-			@intFromBool(reader.seek < reader.end)
-		); // skip newline but not when the file doesn't end with one
+		// Skip newline but not if file doesn't end with one.
+		reader.toss(@intFromBool(reader.seek < reader.end));
 		linenr += 1;
 	}) {
-		// TODO optimize this logic akin to the validation code
-		// 1. variable naming
-		// 2. stringmap
-		const line: []u8 = allocating.written();
-		const trimmed: []const u8 = trimWsStart(line);
-
-		if (!startsWith(trimmed, self.prefix)) {
-			if (write_line == .yes) try writer.print("{s}\n", .{line});
-			continue;
-		}
-
-		const condition_line = trimWsStart(trimmed[self.prefix.len..]);
-		if (startsWith(condition_line, "if")) {
-			scope += 1;
-			if (write_line != .yes) {
-				ignore_scopes += 1;
+		const cmd = blk: {
+			const line = allocating.written();
+			const line_wo_whitespace = trimWsStart(line);
+			if (!startsWith(line_wo_whitespace, self.prefix)) {
+				if (write_line == .yes) try writer.print("{s}\n", .{line});
 				continue;
 			}
-			write_line = if (parser.parse(condition_line["if".len..], &self.macros))
-				.yes else .no;
-		}
-		else if (startsWith(condition_line, "else")) {
-			if (std.mem.trimRight(u8, condition_line, " \t").len == "else".len) {
-				// else is solitary.
-				write_line = if (write_line != .no) .ignore else .yes;
-				continue;
-			}
-			write_line = switch (write_line) {
-				.yes, .ignore => .ignore,
-				else => blk: {
-					const else_skipped = trimWsStart(condition_line["else".len..]);
-					const condition = trimWsStart(else_skipped["if".len..]);
-					const parse_true = parser.parse(condition, &self.macros);
-					break :blk if (parse_true) .yes else .no;
+			break :blk line_wo_whitespace[self.prefix.len..];
+		};
+
+		var iter = std.mem.tokenizeAny(u8, cmd, " \t");
+
+		const keyword = iter.next().?;
+		const keyword_arm = keyword_map.get(keyword).?;
+
+		switch (keyword_arm) {
+			.@"if" => {
+				scope += 1;
+				if (write_line != .yes) {
+					ignore_scopes += 1;
+					continue;
 				}
-			};
-		}
-		else if (startsWith(condition_line, "end")) {
-			if (ignore_scopes == 0) write_line = .yes
-			else ignore_scopes -= 1;
+				write_line = if (parser.parse(cmd[iter.index..], &self.macros))
+					.yes else .no;
+			},
+			.@"else" => {
+				_ = iter.next() orelse {
+					// else is solitary.
+					write_line = if (write_line != .no) .ignore else .yes;
+					continue;
+				};
+				write_line = switch (write_line) {
+					.yes, .ignore => .ignore,
+					else => blk: {
+						const condition = cmd[iter.index..];
+						const parsed_true = parser.parse(condition, &self.macros);
+						break :blk if (parsed_true) .yes else .no;
+					}
+				};
+			},
+			.end => {
+				if (ignore_scopes == 0) write_line = .yes
+				else ignore_scopes -= 1;
+			}
 		}
 	}
 }
