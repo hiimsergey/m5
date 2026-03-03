@@ -20,9 +20,11 @@
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
+const AllocatorWrapper = @import("AllocatorWrapper.zig");
 
 const Context = struct {
 	needs_help: bool = true,
+	error_occured: bool = false,
 	prefix: []const u8 = "",
 	macros: std.StringHashMap([]const u8),
 
@@ -37,21 +39,22 @@ const Context = struct {
 	}
 };
 
+const system_error_code = 71;
 const help_text =
 	\\lt - a simple text file processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/lt)
 	\\v0.1.1   GPL-3.0 license
 	\\
-	\\Usage:
-	\\    lt (INPUTS | OPTION)...
+	\\TODO
 	\\
 ;
 
 pub fn main() u8 {
-	// TODO better allocator
-	const gpa = std.heap.smp_allocator;
+	var aw = AllocatorWrapper.init();
+	defer aw.deinit();
+	const gpa = aw.allocator(std.heap.smp_allocator);
 
-	var args = std.process.argsWithAllocator(gpa) catch return 71;
+	var args = std.process.argsWithAllocator(gpa) catch return system_error_code;
 	defer args.deinit();
 
 	_ = args.skip();
@@ -60,7 +63,7 @@ pub fn main() u8 {
 	defer ctx.deinit();
 
 	batches: while (true) {
-		const output = output: {
+		const output_path = output: {
 			const arg = args.next() orelse break :batches;
 			// TODO NOW PLAN
 			// -- -> next arg must be output
@@ -70,9 +73,11 @@ pub fn main() u8 {
 			ctx.needs_help = false;
 			break :output arg;
 		};
+		_ = output_path;
 		// TODO HERE fetch output fd
 
 		while (args.next()) |arg| {
+			_ = arg;
 			// TODO PLAN arg
 			// \; -> processBatch; continue :batches
 		} else {
@@ -86,13 +91,5 @@ pub fn main() u8 {
 		std.debug.print(help_text, .{});
 		return 1;
 	}
-	return 0;
-}
-
-/// Returns true only if at least one element of `haystack` is equal to
-/// `needle`, according to std.mem.eql.
-fn containsString(haystack: []const []const u8, needle: []const u8) bool {
-	// TODO CONSIDER simd
-	for (haystack) |hay| if (std.mem.eql(u8, hay, needle)) return true;
-	return false;
+	return @intFromBool(ctx.error_occured);
 }
