@@ -10,21 +10,19 @@
 //
 // lt out.1 
 //
-
-// TODO inputcontext
-// fd
-// prefix
-// macros
-// output fd
-
 const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
+const ArgIterator = std.process.ArgIterator;
+const File = std.fs.File;
 
 const Context = struct {
-	needs_help: bool = true,
-	error_occured: bool = false,
+	const TerminationStatus = enum(u8) {ok, need_help, user_error, system_error};
+
+	term_status: TerminationStatus = .ok,
+	batch_nr: u32 = 1,
+
 	prefix: []const u8 = "",
 	macros: std.StringHashMap([]const u8),
 
@@ -37,8 +35,18 @@ const Context = struct {
 	fn deinit(self: *Context) void {
 		self.macros.deinit();
 	}
+
+	/// Clears batch-specific data. Increments batch number
+	fn clear(self: *Context) void {
+		self.batch_nr += 1;
+		self.prefix = "";
+		self.macros.clearRetainingCapacity();
+	}
 };
 
+// TODO make error tag bold
+const error_tag = "\x1b[31merror: ";
+const style_reset = "\x1b[0m\n";
 const system_error_code = 71;
 const help_text =
 	\\lt - a simple text file processor
@@ -48,6 +56,21 @@ const help_text =
 	\\TODO
 	\\
 ;
+
+const stdout_file = std.fs.File.stdout();
+var stdout_buf: [1024]u8 = undefined;
+var stdout_wrapper = stdout_file.writer(&stdout_buf);
+const stdout = &stdout_wrapper.interface;
+
+var stderr_buf: [64]u8 = undefined;
+var stderr_wrapper = std.fs.File.stderr().writer(&stderr_buf);
+const stderr = &stderr_wrapper.interface;
+
+fn err(comptime fmt: []const u8, args: anytype) void {
+	stderr.print(error_tag, .{}) catch {};
+	stderr.print(fmt ++ "\n", args) catch {};
+	stderr.print(style_reset, .{}) catch {};
+}
 
 pub fn main() u8 {
 	var aw = AllocatorWrapper.init();
@@ -62,34 +85,94 @@ pub fn main() u8 {
 	var ctx = Context.init(gpa);
 	defer ctx.deinit();
 
-	batches: while (true) {
-		const output_path = output: {
-			const arg = args.next() orelse break :batches;
-			// TODO NOW PLAN
-			// -- -> next arg must be output
-			// --help -> help msg
-			// -flag -> error: no output
-			// else -> needshelp is false; fetch fd
-			ctx.needs_help = false;
-			break :output arg;
-		};
+	batches: while (true) : (ctx.clear()) {
+		const output_path: []const u8, const output: File =
+			outputPathAndFileFromArgs(&args, &ctx) orelse break :batches;
+		defer output.close();
 		_ = output_path;
-		// TODO HERE fetch output fd
 
 		while (args.next()) |arg| {
-			_ = arg;
-			// TODO PLAN arg
-			// \; -> processBatch; continue :batches
-		} else {
-			// TODO HERE processBatch
-			break :batches;
-		}
+			switch (arg[0]) {
+				';' => continue :batches,
+				'-' => {
+					// TODO NOW
+					// validate flag; run it
+				},
+				else => {
+					// run+validate file
+				}
+			}
+		} else break :batches;
 	}
 
-	if (ctx.needs_help) {
-		// TODO better logging system
-		std.debug.print(help_text, .{});
-		return 1;
+	switch (ctx.term_status) {
+		.ok => return 0,
+		.need_help => {
+			stderr.print(help_text, .{}) catch {};
+			stderr.flush() catch {};
+			return 1;
+		},
+		.user_error => {
+			stderr.flush() catch {};
+			return 1;
+		},
+		.system_error => {
+			stderr.flush() catch {};
+			return system_error_code;
+		}
 	}
-	return @intFromBool(ctx.error_occured);
+}
+
+// TODO FINAL CONSIDER inlining
+/// Returns the path and `std.fs.File` instance of the output file from the first
+/// args.
+/// Handles the -- escape sequence.
+/// On error, logs, alters `ctx.term_status` and returns null.
+fn outputPathAndFileFromArgs(args: *ArgIterator, ctx: *Context)
+?struct {[]const u8, File} {
+	const arg = args.next() orelse return null;
+	switch (arg[0]) {
+		';' => {
+			err("At least one output and one input must be given!", .{});
+			ctx.term_status = .user_error;
+			return null;
+		},
+		'-' => {
+			if (arg.len == 1) return .{"[stdout]", stdout_file}
+			else if (arg[1] == '-') {
+				const path = args.next() orelse {
+					err("Expected argument after escape sequence '--'!", .{});
+					ctx.term_status = .user_error;
+					return null;
+				};
+				const file = std.fs.cwd().openFile(path, .{ .mode = .write_only })
+				catch {
+					err("Failed to open output file!", .{});
+					ctx.term_status = .system_error;
+					return null;
+				};
+				return .{path, file};
+			}
+			else {
+				if (std.mem.eql(u8, arg[1..], "-help")) {
+					ctx.term_status = .need_help;
+					return null;
+				}
+				err("Expected path to output file, got flag '{s}'!", .{arg});
+				ctx.term_status = .user_error;
+				return null;
+			}
+		},
+		else => {
+			const file = std.fs.cwd().openFile(arg, .{ .mode = .write_only })
+			catch {
+				err("Failed to open output file!", .{});
+				ctx.term_status = .system_error;
+				return null;
+			};
+			ctx.term_status = .ok;
+			return .{arg, file};
+		}
+	}
+	unreachable;
 }
