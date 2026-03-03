@@ -22,11 +22,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Context = struct {
-	verbose: bool = false,
-	needs_help: bool = false,
-	arg_i: usize = 0, // TODO DEPRECATE
-
-	output: []const u8,
+	needs_help: bool = true,
 	prefix: []const u8 = "",
 	macros: std.StringHashMap([]const u8),
 
@@ -55,50 +51,42 @@ pub fn main() u8 {
 	// TODO better allocator
 	const gpa = std.heap.smp_allocator;
 
-	const args = std.process.argsAlloc(gpa) catch return 71;
-	defer std.process.argsFree(gpa, args);
+	var args = std.process.argsWithAllocator(gpa) catch return 71;
+	defer args.deinit();
 
-	if (args.len == 1 or containsString(args, "--help")) {
-		// TODO use proper logging
-		std.debug.print(help_text, .{});
-		return 1;
-	}
+	_ = args.skip();
 
-	// args[1..] skips executable name
-	return run(args[1..]);
-}
-
-fn run(gpa: Allocator, args: [][:0]const u8) u8 {
 	var ctx = Context.init(gpa);
 	defer ctx.deinit();
 
-	if (containsString(args, "-v")) ctx.verbose = true;
-
 	batches: while (true) {
-		if (ctx.arg_i == args.len) break :batches;
-
-		// TODO NOW take iter based approach after all
-
-		ctx.output = args[ctx.arg_i];
-		if (ctx.output[0] == '-') {
-			// TODO PLAN
+		const output = output: {
+			const arg = args.next() orelse break :batches;
+			// TODO NOW PLAN
 			// -- -> next arg must be output
+			// --help -> help msg
 			// -flag -> error: no output
-			// else -> fetch fd
-		}
+			// else -> needshelp is false; fetch fd
+			ctx.needs_help = false;
+			break :output arg;
+		};
+		// TODO HERE fetch output fd
 
-		while (true) {
-			ctx.arg_i += 1;
-
+		while (args.next()) |arg| {
+			// TODO PLAN arg
+			// \; -> processBatch; continue :batches
+		} else {
+			// TODO HERE processBatch
+			break :batches;
 		}
 	}
 
 	if (ctx.needs_help) {
+		// TODO better logging system
 		std.debug.print(help_text, .{});
 		return 1;
 	}
-
-	return 8;
+	return 0;
 }
 
 /// Returns true only if at least one element of `haystack` is equal to
