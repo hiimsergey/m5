@@ -8,6 +8,8 @@ const MacroMap = std.StringHashMap(MacroInt);
 const Position = struct { offset: usize, linenr: usize };
 const Self = @This();
 
+const validateKey = @import("root").validateKey;
+
 flags: packed struct(u8) {
 	// TODO FINAL CHECK implemented
 	verbose: bool = false,
@@ -53,7 +55,10 @@ const keyword_map = std.StaticStringMap(Keyword).initComptime(kvs: {
 });
 
 pub fn init(gpa: Allocator) Self {
-	return .{ .macros = MacroMap.init(gpa) };
+	return .{
+		.macros = MacroMap.init(gpa),
+		.labels = LabelMap.init(gpa)
+	};
 }
 
 pub fn deinit(self: *Self) void {
@@ -62,7 +67,7 @@ pub fn deinit(self: *Self) void {
 	self.macros.deinit();
 }
 
-pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
+pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// TODO CHECK if you've handled all errors
 	// handled by m5's validate* functions
 
@@ -88,6 +93,9 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 	var state = WriteState.write;
 	var scope: usize = 0;
 	var ignored_scopes: usize = 0;
+	// TODO
+	const last_jumped: usize = 0;
+	const last_jumped_scope: usize = 0;
 
 	// TODO CHECK
 	while (reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
@@ -95,15 +103,17 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 		// Skips newline but not if file doesn'tend with one.
 		reader.toss(@intFromBool(reader.seek < reader.end));
 		linenr += 1;
+		// TODO ADD after implementation
 	}) {
 		const cmd = cmd: {
 			const line = allocating.written();
 			const line_trimmed = trimWsStart(line);
-			if (!startsWith(line_trimmed, self.prefix)) {
-				if (state == .write) try writer.print("{s}\n", .{line});
+			if (!startsWith(line_trimmed, self.prefix.?)) {
+				if (state == .write)
+					writer.print("{s}\n", .{line}) catch return error.System;
 				continue;
 			}
-			break :cmd line_trimmed[self.prefix.len..];
+			break :cmd line_trimmed[self.prefix.?.len..];
 		};
 		var iter = std.mem.tokenizeAny(u8, cmd, " \t");
 
@@ -151,7 +161,7 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 				if (iter.next() != null) {
 					log.errWithLineNr(
 						linenr,
-						"There can be nothing following end keyword!");
+						"There can be nothing following end keyword!", .{});
 					return error.Generic;
 				}
 
@@ -161,7 +171,7 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 						if (scope == 0) {
 							log.errWithLineNr(
 								linenr,
-								"There can be no 'end' without if clause prior!");
+								"There can be no 'end' without if clause prior!", .{});
 							return error.Generic;
 						}
 					},
@@ -187,16 +197,17 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 				// a->a 
 				// a->b
 
-				const label = trimWsEnd(cmd[iter.index]);
+				const label = trimWsEnd(cmd[iter.index..]);
 
 				const new_entry = Position{ .offset = reader.seek, .linenr = linenr };
-				const cur_entry: Position = self.labels.fetchPut(label, new_entry) catch
-					return error.SystemError
-					orelse new_entry;
-
+				const cur_entry: Position = cur_entry: {
+					const maybe_kv = self.labels.fetchPut(label, new_entry) catch
+						return error.System;
+					break :cur_entry if (maybe_kv) |kv| kv.value else new_entry;
+				};
 				if (cur_entry.offset != new_entry.offset) {
 					log.errWithLineNr(linenr,
-						"You can't declare the same label twice!, .{}");
+						"You can't declare the same label twice!", .{});
 					return error.Generic;
 				}
 
@@ -211,12 +222,125 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 					finding_label = "";
 				}
 			},
-			.goto => {}, // TODO NOW NOW
-			.after => {},
-			.@"resume" => {},
-			.back => {},
-			.define => {},
-			.write => {}
+			.goto => {
+				if (state != .write) continue;
+
+				const label = trimWsEnd(cmd[iter.index..]);
+				if (label.len == 0) {
+					log.errWithLineNr(linenr, "goto statement needs a label name!", .{});
+					return error.Generic;
+				}
+
+				const pos = self.labels.get(label) orelse {
+					state = .find_label;
+					@memcpy(finding_label_buf[0..label.len], label);
+					finding_label = finding_label_buf[0..label.len];
+					continue;
+				};
+
+				// TODO CONSIDER MOVE FUNC
+				scope = 0;
+				ignored_scopes = 0;
+				reader.seek = pos.offset;
+				linenr = pos.linenr;
+			},
+			.after => {
+				if (state != .write) continue;
+
+				const label = trimWsEnd(cmd[iter.index..]);
+				@memcpy(after_label_buf[0..label.len], label);
+				after_label = after_label_buf[0..label.len];
+			},
+			.@"resume" => {
+				if (state != .write) continue;
+				reader.seek = last_jumped;
+				scope = last_jumped_scope;
+			},
+			.back => {
+				if (state != .write) continue;
+
+				const n = n: {
+					const buf = iter.next() orelse break :n 1;
+
+					if (iter.next() != null) {
+						log.errWithLineNr(linenr,
+							"back keyword only takes one argument!", .{});
+						return error.Generic;
+					}
+
+					break :n std.fmt.parseInt(u64, buf, 10) catch |e| switch (e) {
+						error.Overflow => {
+							log.err(
+								\\Number {s} is not representable!"
+								\\Only numbers from {d} to {d} are supported!
+								, .{buf, std.math.minInt(u64), std.math.maxInt(u64)}
+							);
+							return error.Generic;
+						},
+						error.InvalidCharacter => {
+							log.err("Value '{s}' is not a valid number!", .{buf});
+							return error.Generic;
+						}
+					};
+				};
+				writer_wrapper.seekTo(writer_wrapper.pos - n) catch return error.System;
+			},
+			.define => {
+				// TODO support expressions
+
+				if (state != .write) continue;
+
+				const key = key: {
+					const result = iter.next() orelse {
+						log.errWithLineNr(linenr,
+							"define statement needs variable name and value!", .{});
+						return error.Generic;
+					};
+					try validateKey(result);
+					break :key result;
+				};
+				const value = value: {
+					// TODO when implementing expression, you probably dont need trimming
+					const value_buf = trimWsEnd(cmd[iter.index..]);
+					break :value std.fmt.parseInt(MacroInt, value_buf, 10)
+					catch |e| switch (e) {
+						error.Overflow => {
+							log.err(
+								\\Number {s} is not representable!"
+								\\Only numbers from {d} to {d} are supported!
+								, .{value_buf, std.math.minInt(MacroInt),
+									std.math.maxInt(MacroInt)}
+							);
+							return error.Generic;
+						},
+						error.InvalidCharacter => {
+							log.err("Value '{s}' is not a valid number!", .{value_buf});
+							return error.Generic;
+						}
+					};
+				};
+
+				self.macros.put(key, value) catch return error.System;
+			},
+			.write => {
+				if (state != .write) continue;
+
+				const key = value: {
+					const cand = iter.next();
+					const subkeyword = iter.next();
+
+					if (cand == null or subkeyword != null) {
+						log.errWithLineNr(linenr,
+							"write statement expects a single variable name!", .{});
+						return error.Generic;
+					}
+
+					break :value cand.?;
+				};
+				const value: MacroInt = self.macros.get(key) orelse 0;
+
+				writer.print("{d}", .{value}) catch return error.System;
+			}
 		}
 	}
 
@@ -236,6 +360,10 @@ pub fn run(self: *const Self, gpa: Allocator) error{Generic, System}!void {
 	// if verbose, print "Processed <input>..."
 
 	writer.flush() catch return error.System;
+	self.output.?.setEndPos(writer_wrapper.pos) catch |e| {
+		log.err("TODO {s}", .{@errorName(e)});
+		return error.System;
+	};
 }
 
 /// Wrapper around std.mem.startsWith.

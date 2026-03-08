@@ -43,7 +43,7 @@ const log = @import("log.zig");
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Context = @import("Context.zig");
 const File = std.fs.File;
-pub const MacroInt = Context.MacroInt;
+const MacroInt = Context.MacroInt;
 
 const help_text =
 	\\lt - a simple text file processor
@@ -60,21 +60,25 @@ var stdout_wrapper = stdout_file.writer(&stdout_buf);
 const stdout = &stdout_wrapper.interface;
 
 pub fn main() u8 {
-	realMain() catch |e| return switch (e) {
-		error.Generic => 1,
-		error.SystemError => 71
+	realMain() catch |e| switch (e) {
+		error.Generic => return 1,
+		error.System => {
+			log.err("System error!", .{});
+			log.stderr.flush() catch {};
+			return 71;
+		}
 	};
 	return 0;
 }
 
-fn realMain() error{Generic, SystemError}!void {
+fn realMain() error{Generic, System}!void {
 	defer log.stderr.flush() catch {};
 
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
 	const gpa = aw.allocator(std.heap.smp_allocator);
 
-	var args = std.process.argsWithAllocator(gpa) catch return error.SystemError;
+	var args = std.process.argsWithAllocator(gpa) catch return error.System;
 	defer args.deinit();
 	_ = args.skip(); // Skips executable name
 
@@ -131,7 +135,7 @@ fn realMain() error{Generic, SystemError}!void {
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "d:")) {
 			const key: []const u8, const value: MacroInt = try readDefinition(arg);
-			ctx.macros.put(key, value) catch return error.SystemError;
+			ctx.macros.put(key, value) catch return error.System;
 		}
 		else {
 			log.errWithHelp("Invalid flag '{s}'!", .{arg});
@@ -153,42 +157,26 @@ fn realMain() error{Generic, SystemError}!void {
 		return error.Generic;
 	}
 
-	ctx.output = ctx.output orelse std.fs.File.stdout();
+	var use_stdout = false;
+	ctx.output = ctx.output orelse output: {
+		use_stdout = true;
+		// TODO PLAN
+		// check if tmpfile exists and error
+		// create tmpfile
+	};
 	try ctx.run(gpa);
+
+	if (use_stdout) {
+		// TODO redirect to stdout
+		// delete tmpfile
+	}
 }
 
 /// Logs on error.
-fn readDefinition(flag: []const u8) error{Generic}!struct {[]const u8, MacroInt} {
+fn readDefinition(flag: []const u8) error{Generic}!struct { []const u8, MacroInt } {
 	// '=' is also banned, of course, but is guaranteed to not appear in
 	// the key string.
-	const banned_chars = "+-&|!<>() \t";
 	const definition = flag["-d:".len..];
-
-	const validateKey = struct {
-		/// Returns an error and logs if `buf` can't be a valid key.
-		fn f(buf: []const u8) error{Generic}!void {
-			if (buf.len == 0) {
-				log.err("You can't define a macro with an empty name!", .{});
-				return error.Generic;
-			}
-			for (buf) |c| if (std.mem.containsAtLeastScalar(u8, banned_chars, 1, c)) {
-				log.err("Key '{s}' contains forbidden character '{c}'!", .{buf, c});
-				return error.Generic;
-			};
-			if (isNumber(buf)) {
-				log.err("Keys can't be numbers!", .{});
-				return error.Generic;
-			}
-		}
-
-		fn isNumber(buf: []const u8) bool {
-			for (buf) |c| switch (c) {
-				'0'...'9', '_' => continue,
-				else => return false
-			};
-			return true;
-		}
-	}.f;
 
 	const key_cand: []const u8, const value: MacroInt = kv: {
 		const eq_index = std.mem.indexOfScalar(u8, definition, '=') orelse
@@ -199,14 +187,14 @@ fn readDefinition(flag: []const u8) error{Generic}!struct {[]const u8, MacroInt}
 		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| switch (e) {
 			error.Overflow => {
 				log.err(
-					\\The number {s} is not representable!"
+					\\Number {s} is not representable!"
 					\\Only numbers from {d} to {d} are supported!
 					, .{value_buf, std.math.minInt(MacroInt), std.math.maxInt(MacroInt)}
 				);
 				return error.Generic;
 			},
 			error.InvalidCharacter => {
-				log.err("The value '{s}' is not a valid number!", .{value_buf});
+				log.err("Value '{s}' is not a valid number!", .{value_buf});
 				return error.Generic;
 			}
 		};
@@ -217,5 +205,33 @@ fn readDefinition(flag: []const u8) error{Generic}!struct {[]const u8, MacroInt}
 	try validateKey(key_cand);
 	return .{key_cand, value};
 }
+
+pub const validateKey = struct {
+	const banned_chars = "+-&|!<>() \t";
+
+	/// Returns an error and logs if `buf` can't be a valid key.
+	fn f(buf: []const u8) error{Generic}!void {
+		if (buf.len == 0) {
+			log.err("You can't define a macro with an empty name!", .{});
+			return error.Generic;
+		}
+		for (buf) |c| if (std.mem.containsAtLeastScalar(u8, banned_chars, 1, c)) {
+			log.err("Key '{s}' contains forbidden character '{c}'!", .{buf, c});
+			return error.Generic;
+		};
+		if (isNumber(buf)) {
+			log.err("Keys can't be numbers!", .{});
+			return error.Generic;
+		}
+	}
+
+	fn isNumber(buf: []const u8) bool {
+		for (buf) |c| switch (c) {
+			'0'...'9', '_' => continue,
+			else => return false
+		};
+		return true;
+	}
+}.f;
 
 // TODO TEST non-ascii define names, like cyrillic
