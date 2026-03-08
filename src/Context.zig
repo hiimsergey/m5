@@ -85,8 +85,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// TODO CONSIDER MOVE STRUCT
 	// TODOD ERRHANDLE too long label in definition
 	// TODOD ERRHANDLE too long prefix in definition
-	var after_label_buf: [64]u8 = undefined;
-	var finding_label_buf: [64]u8 = undefined;
+	var _after_label_buf: [64]u8 = undefined;
+	var _finding_label_buf: [64]u8 = undefined;
 	var after_label: []const u8 = "";
 	var finding_label: []const u8 = "";
 	var linenr: usize = 1;
@@ -233,8 +233,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 				const pos = self.labels.get(label) orelse {
 					state = .find_label;
-					@memcpy(finding_label_buf[0..label.len], label);
-					finding_label = finding_label_buf[0..label.len];
+					@memcpy(_finding_label_buf[0..label.len], label);
+					finding_label = _finding_label_buf[0..label.len];
 					continue;
 				};
 
@@ -248,8 +248,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (state != .write) continue;
 
 				const label = trimWsEnd(cmd[iter.index..]);
-				@memcpy(after_label_buf[0..label.len], label);
-				after_label = after_label_buf[0..label.len];
+				@memcpy(_after_label_buf[0..label.len], label);
+				after_label = _after_label_buf[0..label.len];
 			},
 			.@"resume" => {
 				if (state != .write) continue;
@@ -259,8 +259,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			.back => {
 				if (state != .write) continue;
 
-				const n = n: {
-					const buf = iter.next() orelse break :n 1;
+				const n: i64 = n: {
+					const buf = iter.next() orelse break :n -1;
 
 					if (iter.next() != null) {
 						log.errWithLineNr(linenr,
@@ -268,22 +268,29 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						return error.Generic;
 					}
 
-					break :n std.fmt.parseInt(u64, buf, 10) catch |e| switch (e) {
+					const absolute = std.fmt.parseInt(u32, buf, 10) catch |e| switch (e) {
 						error.Overflow => {
-							log.err(
+							log.errWithLineNr(
+								linenr,
 								\\Number {s} is not representable!"
 								\\Only numbers from {d} to {d} are supported!
-								, .{buf, std.math.minInt(u64), std.math.maxInt(u64)}
+								, .{buf, std.math.minInt(u32), std.math.maxInt(u32)}
 							);
 							return error.Generic;
 						},
 						error.InvalidCharacter => {
-							log.err("Value '{s}' is not a valid number!", .{buf});
+							log.errWithLineNr(linenr,
+								"Value '{s}' is not a valid number!", .{buf});
 							return error.Generic;
 						}
 					};
+					break :n std.math.negate(@as(i64, absolute)) catch unreachable;
 				};
-				writer_wrapper.seekTo(writer_wrapper.pos - n) catch return error.System;
+				// TODO NOW NOW
+				self.output.?.seekBy(n) catch |e| {
+					std.debug.print("TODO {s}\n", .{@errorName(e)});
+					return error.System;
+				};
 			},
 			.define => {
 				// TODO support expressions
@@ -305,7 +312,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					break :value std.fmt.parseInt(MacroInt, value_buf, 10)
 					catch |e| switch (e) {
 						error.Overflow => {
-							log.err(
+							log.errWithLineNr(
+								linenr,
 								\\Number {s} is not representable!"
 								\\Only numbers from {d} to {d} are supported!
 								, .{value_buf, std.math.minInt(MacroInt),
@@ -314,7 +322,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							return error.Generic;
 						},
 						error.InvalidCharacter => {
-							log.err("Value '{s}' is not a valid number!", .{value_buf});
+							log.errWithLineNr(linenr,
+								"Value '{s}' is not a valid number!", .{value_buf});
 							return error.Generic;
 						}
 					};
@@ -360,7 +369,11 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// if verbose, print "Processed <input>..."
 
 	writer.flush() catch return error.System;
-	self.output.?.setEndPos(writer_wrapper.pos) catch |e| {
+	// TODO DEBUG why does this turn to zero
+	std.debug.print("TODO writer.end == {d}\n", .{writer.end});
+
+	const fpos = self.output.?.getPos() catch return error.System;
+	self.output.?.setEndPos(fpos) catch |e| {
 		log.err("TODO {s}", .{@errorName(e)});
 		return error.System;
 	};

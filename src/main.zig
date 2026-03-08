@@ -53,6 +53,7 @@ const help_text =
 	\\TODO
 	\\
 ;
+const stdout_proxy_basename = ".lt-stdout-proxy.tmp";
 
 const stdout_file = File.stdout();
 var stdout_buf: [1024]u8 = undefined;
@@ -63,7 +64,7 @@ pub fn main() u8 {
 	realMain() catch |e| switch (e) {
 		error.Generic => return 1,
 		error.System => {
-			log.err("System error!", .{});
+			log.err("System failure!", .{});
 			log.stderr.flush() catch {};
 			return 71;
 		}
@@ -157,19 +158,50 @@ fn realMain() error{Generic, System}!void {
 		return error.Generic;
 	}
 
-	var use_stdout = false;
-	ctx.output = ctx.output orelse output: {
-		use_stdout = true;
+	const use_stdout: bool = use_stdout: {
+		if (ctx.output != null) break :use_stdout false;
+
 		// TODO PLAN
-		// check if tmpfile exists and error
-		// create tmpfile
+		ctx.output = cwd.createFile(stdout_proxy_basename, .{ .read = true, .exclusive = true })
+		catch |e| switch (e) {
+			error.PathAlreadyExists => {
+				log.err(
+					\\lt uses the temporary file '{s}' as a proxy for stdout
+					\\but it already exists!
+					\\If you need to write to stdout, please remove it!
+					, .{stdout_proxy_basename}
+				);
+				return error.Generic;
+			},
+			else => return error.System
+		};
+		break :use_stdout true;
 	};
-	try ctx.run(gpa);
+
+	// This is where the fun begins!
+	const ret = ctx.run(gpa);
 
 	if (use_stdout) {
-		// TODO redirect to stdout
-		// delete tmpfile
+		var reader_buf: [1024]u8 = undefined;
+		var reader_wrapper = ctx.output.?.reader(&reader_buf);
+
+		_ = reader_wrapper.interface.streamRemaining(stdout) catch |e| {
+			std.debug.print("TODO {s}\n", .{@errorName(e)});
+			return error.System;
+		};
+		stdout.flush() catch return error.System;
+
+		cwd.deleteFile(stdout_proxy_basename) catch {
+			log.err(
+				\\lt uses the temporary file '{s}' as a proxy for stdout
+				\\but it failed to delete it afterwards! Sorry! :(
+				, .{stdout_proxy_basename}
+			);
+			return error.System;
+		};
 	}
+
+	return ret;
 }
 
 /// Logs on error.
