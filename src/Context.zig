@@ -3,9 +3,7 @@ const log = @import("log.zig");
 
 const Allocator = std.mem.Allocator;
 const File = std.fs.File;
-const LabelMap = std.StringHashMap(Position);
-const MacroMap = std.StringHashMap(MacroInt);
-const Position = struct { offset: usize, linenr: usize };
+/// Process-specific metadata
 const Self = @This();
 
 const validateKey = @import("root").validateKey;
@@ -25,6 +23,9 @@ macros: MacroMap,
 labels: LabelMap,
 
 pub const MacroInt = isize;
+const LabelMap = std.StringHashMap(Position);
+const MacroMap = std.StringHashMap(MacroInt);
+const Position = struct { offset: usize, linenr: usize };
 
 // TODO PLAN keywords
 const Keyword = enum(u8) {
@@ -259,8 +260,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			.back => {
 				if (state != .write) continue;
 
-				const n: i64 = n: {
-					const buf = iter.next() orelse break :n -1;
+				const n: u64 = n: {
+					const buf = iter.next() orelse break :n 1;
 
 					if (iter.next() != null) {
 						log.errWithLineNr(linenr,
@@ -268,13 +269,13 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						return error.Generic;
 					}
 
-					const absolute = std.fmt.parseInt(u32, buf, 10) catch |e| switch (e) {
+					break :n std.fmt.parseInt(u64, buf, 10) catch |e| switch (e) {
 						error.Overflow => {
 							log.errWithLineNr(
 								linenr,
 								\\Number {s} is not representable!"
 								\\Only numbers from {d} to {d} are supported!
-								, .{buf, std.math.minInt(u32), std.math.maxInt(u32)}
+								, .{buf, std.math.minInt(u64), std.math.maxInt(u64)}
 							);
 							return error.Generic;
 						},
@@ -284,13 +285,10 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							return error.Generic;
 						}
 					};
-					break :n std.math.negate(@as(i64, absolute)) catch unreachable;
 				};
-				// TODO NOW NOW
-				self.output.?.seekBy(n) catch |e| {
-					std.debug.print("TODO {s}\n", .{@errorName(e)});
-					return error.System;
-				};
+
+				writer.flush() catch return error.System;
+				writer_wrapper.seekTo(writer_wrapper.pos - n) catch return error.System;
 			},
 			.define => {
 				// TODO support expressions
@@ -334,7 +332,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			.write => {
 				if (state != .write) continue;
 
-				const key = value: {
+				const key = key: {
 					const cand = iter.next();
 					const subkeyword = iter.next();
 
@@ -344,7 +342,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						return error.Generic;
 					}
 
-					break :value cand.?;
+					break :key cand.?;
 				};
 				const value: MacroInt = self.macros.get(key) orelse 0;
 
@@ -369,14 +367,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// if verbose, print "Processed <input>..."
 
 	writer.flush() catch return error.System;
-	// TODO DEBUG why does this turn to zero
-	std.debug.print("TODO writer.end == {d}\n", .{writer.end});
-
-	const fpos = self.output.?.getPos() catch return error.System;
-	self.output.?.setEndPos(fpos) catch |e| {
-		log.err("TODO {s}", .{@errorName(e)});
-		return error.System;
-	};
+	self.output.?.setEndPos(writer_wrapper.pos) catch return error.System;
 }
 
 /// Wrapper around std.mem.startsWith.

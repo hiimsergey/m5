@@ -162,7 +162,8 @@ fn realMain() error{Generic, System}!void {
 		if (ctx.output != null) break :use_stdout false;
 
 		// TODO PLAN
-		ctx.output = cwd.createFile(stdout_proxy_basename, .{ .read = true, .exclusive = true })
+		ctx.output = cwd.createFile(stdout_proxy_basename,
+			.{ .read = true, .exclusive = true })
 		catch |e| switch (e) {
 			error.PathAlreadyExists => {
 				log.err(
@@ -175,6 +176,7 @@ fn realMain() error{Generic, System}!void {
 			},
 			else => return error.System
 		};
+
 		break :use_stdout true;
 	};
 
@@ -185,10 +187,7 @@ fn realMain() error{Generic, System}!void {
 		var reader_buf: [1024]u8 = undefined;
 		var reader_wrapper = ctx.output.?.reader(&reader_buf);
 
-		_ = reader_wrapper.interface.streamRemaining(stdout) catch |e| {
-			std.debug.print("TODO {s}\n", .{@errorName(e)});
-			return error.System;
-		};
+		_ = reader_wrapper.interface.streamRemaining(stdout) catch return error.System;
 		stdout.flush() catch return error.System;
 
 		cwd.deleteFile(stdout_proxy_basename) catch {
