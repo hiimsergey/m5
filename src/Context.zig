@@ -1,5 +1,6 @@
 const std = @import("std");
 const log = @import("log.zig");
+const parser = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;
 const File = std.fs.File;
@@ -23,17 +24,18 @@ macros: MacroMap,
 labels: LabelMap,
 
 pub const MacroInt = isize;
+pub const MacroMap = std.StringHashMap(MacroInt);
 const LabelMap = std.StringHashMap(Position);
-const MacroMap = std.StringHashMap(MacroInt);
+
 const Position = struct { offset: usize, linenr: usize };
 
 // TODO PLAN keywords
 const Keyword = enum(u8) {
 	@"if", @"else", end,
 	label, goto, after, @"resume",
-	back,
 	define,
-	write
+	write,
+	back
 };
 
 const WriteState = enum(u8) {
@@ -101,7 +103,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// TODO CHECK
 	while (reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
 		allocating.clearRetainingCapacity();
-		// Skips newline but not if file doesn'tend with one.
+		// Skips newline but not if file doesn't end with one.
 		reader.toss(@intFromBool(reader.seek < reader.end));
 		linenr += 1;
 		// TODO ADD after implementation
@@ -130,15 +132,18 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 		switch (keyword_arm) {
 			.@"if" => {
-				// TODO use iter to parse new words
-				// TODO parser.parse should error on empty condition
 				scope += 1;
 				switch (state) {
 					.write => {
-						// TODO PLAN
-						// parse
-						// if true, continue
-						// else state:=dont_write
+						const expression = trimWsEnd(cmd[iter.index..]);
+						if (expression.len == 0) {
+							log.errWithLineNr(linenr,
+								"if clause expects expression!", .{});
+							return error.Generic;
+						}
+
+						if (try parser.parse(expression, linenr, &self.macros)) continue;
+						state = .dont_write;
 					},
 					.dont_write, .ignore => ignored_scopes += 1,
 					// TODO CONSIDER automatically setting scope to 0 when entering find label
@@ -146,14 +151,23 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				}
 			},
 			.@"else" => {
-				// TODO use iter to parse new words
 				switch (state) {
 					.write => state = .ignore,
 					.dont_write => {
-						// TODO PLAN
-						// parse
-						// if true, continue
-						// else state:=dont_write
+						if (iter.next() == null) {
+							state = .write;
+							continue;
+						}
+
+						const expression = trimWsEnd(cmd[iter.index..]);
+						if (expression.len == 0) {
+							log.errWithLineNr(linenr,
+								"else clause expects expression!", .{});
+							return error.Generic;
+						}
+
+						if (try parser.parse(expression)) state = .write
+						else state = .dont_write;
 					},
 					.ignore, .find_label => {}
 				}
@@ -162,7 +176,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (iter.next() != null) {
 					log.errWithLineNr(
 						linenr,
-						"There can be nothing following end keyword!", .{});
+						"There can be nothing following 'end'!", .{});
 					return error.Generic;
 				}
 
@@ -185,7 +199,6 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				scope -= 1;
 			},
 			.label => {
-				// TODO check if theres label body
 				// TODO CONSIDER
 				if (scope > 0) {
 					log.errWithLineNr(linenr,
@@ -193,12 +206,12 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					return error.Generic;
 				}
 
-				// TODO PLAN
-				// null->a return a
-				// a->a 
-				// a->b
-
 				const label = trimWsEnd(cmd[iter.index..]);
+				if (label.len == 0) {
+					log.errWithLineNr(linenr,
+						"label declaration expects label name!", .{});
+					return error.Generic;
+				}
 
 				const new_entry = Position{ .offset = reader.seek, .linenr = linenr };
 				const cur_entry: Position = cur_entry: {
@@ -228,7 +241,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 				const label = trimWsEnd(cmd[iter.index..]);
 				if (label.len == 0) {
-					log.errWithLineNr(linenr, "goto statement needs a label name!", .{});
+					log.errWithLineNr(linenr, "goto statement expects label name!", .{});
 					return error.Generic;
 				}
 
@@ -245,9 +258,9 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				reader.seek = pos.offset;
 				linenr = pos.linenr;
 			},
+			// TODO implement
 			.after => {
 				if (state != .write) continue;
-
 				const label = trimWsEnd(cmd[iter.index..]);
 				@memcpy(_after_label_buf[0..label.len], label);
 				after_label = _after_label_buf[0..label.len];
@@ -257,7 +270,71 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				reader.seek = last_jumped;
 				scope = last_jumped_scope;
 			},
+			.define => {
+				// TODO support expressions
+
+				if (state != .write) continue;
+
+				const key = key: {
+					const result = iter.next() orelse {
+						log.errWithLineNr(linenr,
+							"define statement needs variable name and value!", .{});
+						return error.Generic;
+					};
+					try validateKey(result);
+					break :key result;
+				};
+				const value = value: {
+					// TODO when implementing expression, you probably dont need trimming
+					const value_buf = trimWsEnd(cmd[iter.index..]);
+					break :value std.fmt.parseInt(MacroInt, value_buf, 10)
+					catch |e| switch (e) {
+						// TODO ALL CONSIDER REPLACE with only logs in arms, then a single
+						// return error.Generic
+						error.Overflow => {
+							log.errWithLineNr(
+								linenr,
+								\\Number {s} is not representable!"
+								\\Only numbers from {d} to {d} are supported!
+								, .{value_buf, std.math.minInt(MacroInt),
+									std.math.maxInt(MacroInt)}
+							);
+							return error.Generic;
+						},
+						error.InvalidCharacter => {
+							log.errWithLineNr(linenr,
+								"Value '{s}' is not a valid number!", .{value_buf});
+							return error.Generic;
+						}
+					};
+				};
+
+				self.macros.put(key, value) catch return error.System;
+			},
+			.write => {
+				// TODO support math expressions
+
+				if (state != .write) continue;
+
+				const key = key: {
+					const cand = iter.next();
+					const subkeyword = iter.next();
+
+					if (cand == null or subkeyword != null) {
+						log.errWithLineNr(linenr,
+							"write statement expects a single variable name!", .{});
+						return error.Generic;
+					}
+
+					break :key cand.?;
+				};
+				const value: MacroInt = self.macros.get(key) orelse 0;
+
+				writer.print("{d}", .{value}) catch return error.System;
+			},
 			.back => {
+				// TODO CONSIDER support math expressions
+
 				if (state != .write) continue;
 
 				const n: u64 = n: {
@@ -265,7 +342,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 					if (iter.next() != null) {
 						log.errWithLineNr(linenr,
-							"back keyword only takes one argument!", .{});
+							"'back' only takes one argument!", .{});
 						return error.Generic;
 					}
 
@@ -289,69 +366,13 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 				writer.flush() catch return error.System;
 				writer_wrapper.seekTo(writer_wrapper.pos - n) catch return error.System;
-			},
-			.define => {
-				// TODO support expressions
-
-				if (state != .write) continue;
-
-				const key = key: {
-					const result = iter.next() orelse {
-						log.errWithLineNr(linenr,
-							"define statement needs variable name and value!", .{});
-						return error.Generic;
-					};
-					try validateKey(result);
-					break :key result;
-				};
-				const value = value: {
-					// TODO when implementing expression, you probably dont need trimming
-					const value_buf = trimWsEnd(cmd[iter.index..]);
-					break :value std.fmt.parseInt(MacroInt, value_buf, 10)
-					catch |e| switch (e) {
-						error.Overflow => {
-							log.errWithLineNr(
-								linenr,
-								\\Number {s} is not representable!"
-								\\Only numbers from {d} to {d} are supported!
-								, .{value_buf, std.math.minInt(MacroInt),
-									std.math.maxInt(MacroInt)}
-							);
-							return error.Generic;
-						},
-						error.InvalidCharacter => {
-							log.errWithLineNr(linenr,
-								"Value '{s}' is not a valid number!", .{value_buf});
-							return error.Generic;
-						}
-					};
-				};
-
-				self.macros.put(key, value) catch return error.System;
-			},
-			.write => {
-				if (state != .write) continue;
-
-				const key = key: {
-					const cand = iter.next();
-					const subkeyword = iter.next();
-
-					if (cand == null or subkeyword != null) {
-						log.errWithLineNr(linenr,
-							"write statement expects a single variable name!", .{});
-						return error.Generic;
-					}
-
-					break :key cand.?;
-				};
-				const value: MacroInt = self.macros.get(key) orelse 0;
-
-				writer.print("{d}", .{value}) catch return error.System;
 			}
 		}
 	}
 
-	// TODO error or label defined on positive scope
+	// TODO ERRHANDLE state != .write
+
+	// TODO error on label defined on positive scope
 	// TODO FINAL ADD new kind of verbose code
 	// TODO PLAN
 	// for every line

@@ -1,11 +1,9 @@
 const std = @import("std");
 
-const File = std.fs.File;
-
 const error_tag = "\x1b[31;1merror:\x1b[0m ";
 
-var stderr_buf: [64]u8 = undefined;
-var stderr_wrapper = File.stderr().writer(&stderr_buf);
+var stderr_buf: [128]u8 = undefined;
+var stderr_wrapper = std.fs.File.stderr().writer(&stderr_buf);
 
 pub const stderr = &stderr_wrapper.interface;
 

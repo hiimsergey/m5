@@ -1,16 +1,3 @@
-// TODO
-// variables are not "0" by default but undefined
-// expression containing these variables are automatically false
-// keyword: assert <expr> if expr is false, results in error
-// arguments: lt {-p:prefix {(-d:key(=val)) {input}}+ -o output }
-// support -- as output that lets you use the file "-" as output
-// ^ means, ExpectationStatus.output gets delayed
-// the output-first notation allows having nothing as prefix
-// \; is probably the termination character
-//
-// lt out.1 
-//
-
 // TODO new arg table
 // --help help
 // -safe exit with error if encountering undefined variable, treat it as false otherwise
@@ -34,8 +21,6 @@
 // defines
 
 // TODO prevent file-defined macros to leak into other files
-// TODO use tagged unions int/string
-// TODO decide between arraylist and arenaallocator for macro strings
 
 const std = @import("std");
 const log = @import("log.zig");
@@ -86,7 +71,7 @@ fn realMain() error{Generic, System}!void {
 	var ctx = Context.init(gpa);
 	defer ctx.deinit();
 
-	const stdin = std.fs.File.stdin();
+	const stdin = File.stdin();
 	const input_from_pipe: bool = !stdin.isTty();
 	const cwd = std.fs.cwd();
 
@@ -109,9 +94,11 @@ fn realMain() error{Generic, System}!void {
 			log.stderr.print(help_text, .{}) catch {};
 			return error.Generic;
 		}
+		// TODO implemnt
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			ctx.flags.safe = true;
 		}
+		// TODO implemnt
 		else if (std.mem.eql(u8, arg[1..], "-verbose")) {
 			ctx.flags.verbose = true;
 		}
@@ -124,15 +111,15 @@ fn realMain() error{Generic, System}!void {
 			};
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "p:")) {
-			const body = arg["-p:".len..];
-			if (body.len > ctx._prefix_buf.len) {
+			const prefix = arg["-p:".len..];
+			if (prefix.len > ctx._prefix_buf.len) {
 				log.err(
 					"Prefix must be at most {d} characters (bytes) long!",
 					.{ctx._prefix_buf.len});
 				return error.Generic;
 			}
-			@memcpy(ctx._prefix_buf[0..body.len], body);
-			ctx.prefix = ctx._prefix_buf[0..body.len];
+			@memcpy(ctx._prefix_buf[0..prefix.len], prefix);
+			ctx.prefix = ctx._prefix_buf[0..prefix.len];
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "d:")) {
 			const key: []const u8, const value: MacroInt = try readDefinition(arg);
