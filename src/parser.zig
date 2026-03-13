@@ -1,7 +1,10 @@
 const std = @import("std");
 const log = @import("log.zig");
 
-const MacroMap = @import("Context.zig").MacroMap;
+const Context = @import("Context.zig");
+
+const MacroInt = Context.MacroInt;
+const MacroMap = Context.MacroMap;
 
 const ConditionIterator = struct {
 	expression: []const u8,
@@ -57,6 +60,7 @@ const ParseState = enum(u8) {
 	expecting_operator
 };
 
+// TODO CONSIDER MOVE validate out, so that the other functions dont use linenr
 pub fn parse(
 	expression: []const u8,
 	linenr: usize,
@@ -72,7 +76,7 @@ fn parseOr(condition: []const u8, macros: *const MacroMap) bool {
 	var iter = ConditionIterator.init(condition, '|');
 	while (iter.next()) |slice| {
 		// TODO CONSIDER use endBracket somewhere
-		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
+		const parse_result = if (slice[0] == '(') parseOr(slice[1..], macros)
 			else parseAnd(slice, macros);
 		result = result or parse_result;
 	}
@@ -85,7 +89,7 @@ fn parseAnd(condition: []const u8, macros: *const MacroMap) bool {
 
 	while (iter.next()) |slice| {
 		// TODO CONSIDER use endBracket somewhere
-		const parse_result = if (slice[0] == '(') parse(slice[1..], macros)
+		const parse_result = if (slice[0] == '(') parseOr(slice[1..], macros)
 			else parseCmp(slice, macros);
 		result = result and parse_result;
 	}
@@ -103,65 +107,55 @@ fn parseCmp(condition: []const u8, macros: *const MacroMap) bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
+				const lhs = termValue(condition[0..i], macros);
 
 				if (condition[i + 1] == '=') {
-					const rhs = parseU32(termValue(condition[i + 2..], macros)) catch 1;
+					const rhs = termValue(condition[i + 2..], macros);
 					return lhs >= rhs;
 				}
-				const rhs = parseU32(termValue(condition[i + 1..], macros)) catch 1;
+				const rhs = termValue(condition[i + 1..], macros);
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
+				const lhs = termValue(condition[0..i], macros);
 
 				if (condition[i + 1] == '=') {
-					const rhs = parseU32(termValue(condition[i + 2..], macros)) catch 1;
+					const rhs = termValue(condition[i + 2..], macros);
 					return lhs <= rhs;
 				}
-				const rhs = parseU32(termValue(condition[i + 1..], macros)) catch 1;
+				const rhs = termValue(condition[i + 1..], macros);
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
-				const rhs = parseU32(termValue(condition[i + 1..], macros)) catch 1;
+				const lhs = termValue(condition[0..i], macros);
+				const rhs = termValue(condition[i + 1..], macros);
 				return lhs == rhs;
 			},
 			'!' => {
-				const lhs = parseU32(termValue(condition[0..i], macros)) catch 1;
-				const rhs = parseU32(termValue(condition[i + 2..], macros)) catch 1;
+				const lhs = termValue(condition[0..i], macros);
+				const rhs = termValue(condition[i + 2..], macros);
 				return lhs != rhs;
 			},
 			else => continue
 		}
 	}
-	const value = parseU32(termValue(condition, macros)) catch 1;
+	const value = termValue(condition, macros);
 	return value > 0;
 }
 
 // TODO CONSIDER returning u32s already
-fn termValue(term: []const u8, macros: *const MacroMap) []const u8 {
+fn termValue(term: []const u8, macros: *const MacroMap) MacroInt {
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
 
-	const tmp_result = if (isNumber(trimmed)) trimmed
-		else macros.get(trimmed) orelse "0";
-	if (!negate) return tmp_result;
+	// TODO RENAME here
+	const trimmed_number = std.fmt.parseInt(MacroInt, trimmed, 10) catch
+		return macros.get(trimmed) orelse 0;
 
-	const literal_value = parseU32(trimmed) catch {
-		const macro_value = macros.get(trimmed) orelse return "";
-		const macro_literal_value = parseU32(macro_value) catch return "0";
-		return switch (macro_literal_value) {
-			0 => "",
-			else => "0"
-		};
-	};
-	return switch (literal_value) {
-		0 => "",
-		else => "0"
-	};
+	if (!negate) return trimmed_number;
+	return @intFromBool(trimmed_number == 0);
 }
 
 /// Return whether given string could be successfully parsed into a number.
@@ -177,7 +171,7 @@ fn isNumber(buf: []const u8) bool {
 // TODO FINAL CONSIDER replacing all this with controlled checks in the ConditionIterator
 /// Checks `expression` on syntactical validity.
 /// Logs on error.
-fn validate(expression: []const u8, linenr: usize) error{Generic}!bool {
+fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 	var scope: usize = 0;
 	var state = ParseState.expecting_expression;
 	var cur_num_literal: []const u8 = "";
@@ -258,7 +252,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!bool {
 		},
 		'&', '|', '=' => switch (state) {
 			.expecting_expression => {
-				log.errWithLineNr(
+				log.errWithLineNr(linenr,
 					"Expected expression, got operator '{c}'!",
 					.{expression[i]});
 				return error.Generic;
@@ -268,7 +262,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!bool {
 		'<', '>' => {
 			switch (state) {
 				.expecting_expression => {
-					log.errWithLineNr(
+					log.errWithLineNr(linenr,
 						"Expected expression, got comparison operator '{c}'!",
 						.{expression[i]});
 					return error.Generic;

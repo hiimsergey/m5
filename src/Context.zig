@@ -27,15 +27,23 @@ pub const MacroInt = isize;
 pub const MacroMap = std.StringHashMap(MacroInt);
 const LabelMap = std.StringHashMap(Position);
 
-const Position = struct { offset: usize, linenr: usize };
+const Position = struct { seek: usize, linenr: usize };
 
-// TODO PLAN keywords
 const Keyword = enum(u8) {
 	@"if", @"else", end,
 	label, goto, after, @"resume",
 	define,
 	write,
 	back
+};
+
+const AfterState = enum(u8) {
+	/// There is no after label
+	none,
+	/// There is after label, but currently not running it
+	has,
+	/// Currently running after label
+	in
 };
 
 const WriteState = enum(u8) {
@@ -46,7 +54,10 @@ const WriteState = enum(u8) {
 	/// Don't write next line until end of scope
 	ignore,
 	/// Don't write next line until finding label definition or EOF
-	find_label
+	find_label_goto,
+	/// Don't write next line until finding label definition or EOF,
+	/// then jump back to where this state was set
+	find_label_after
 };
 
 const keyword_map = std.StaticStringMap(Keyword).initComptime(kvs: {
@@ -85,23 +96,41 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	var writer_wrapper = self.output.?.writer(&writer_buf);
 	const writer = &writer_wrapper.interface;
 
-	// TODO CONSIDER MOVE STRUCT
-	// TODOD ERRHANDLE too long label in definition
-	// TODOD ERRHANDLE too long prefix in definition
-	var _after_label_buf: [64]u8 = undefined;
+	// TODO ERRHANDLE too long label in definition
+	// TODO ERRHANDLE too long prefix in definition
 	var _finding_label_buf: [64]u8 = undefined;
-	var after_label: []const u8 = "";
 	var finding_label: []const u8 = "";
-	var linenr: usize = 1;
+	var after_state = AfterState.none;
+	var after_pos: Position = undefined;
+
 	var state = WriteState.write;
+	var linenr: usize = 1;
 	var scope: usize = 0;
 	var ignored_scopes: usize = 0;
-	// TODO
-	const last_jumped: usize = 0;
-	const last_jumped_scope: usize = 0;
 
-	// TODO CHECK
+	// TODO CONSIDER MOVE STRUCT
+	var last_jumped: Position = undefined;
+	var last_jumped_scope: usize = 0;
+	var last_ignored_scopes: usize = 0;
+
+	// TODO TEST off by one error when jumping
+
+	// TODO TEST requirements for a line-by-line while loop
+	// - handles missing \n on last line
+	// - doesnt stop on blank lines
 	while (reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
+		if (after_state == .has) {
+			after_state = .in;
+
+			last_jumped = Position{ .seek = reader.seek, .linenr = linenr };
+			last_jumped_scope = scope;
+			last_ignored_scopes = ignored_scopes;
+
+			reader.seek = after_pos.seek;
+			linenr = after_pos.linenr;
+			scope = 0;
+			ignored_scopes = 0;
+		}
 		allocating.clearRetainingCapacity();
 		// Skips newline but not if file doesn't end with one.
 		reader.toss(@intFromBool(reader.seek < reader.end));
@@ -138,7 +167,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						const expression = trimWsEnd(cmd[iter.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
-								"if clause expects expression!", .{});
+								"'if' clause expects expression!", .{});
 							return error.Generic;
 						}
 
@@ -147,7 +176,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					},
 					.dont_write, .ignore => ignored_scopes += 1,
 					// TODO CONSIDER automatically setting scope to 0 when entering find label
-					.find_label => {}
+					.find_label_goto, .find_label_after => {}
 				}
 			},
 			.@"else" => {
@@ -162,14 +191,15 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						const expression = trimWsEnd(cmd[iter.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
-								"else clause expects expression!", .{});
+								"'else' clause expects expression!", .{});
 							return error.Generic;
 						}
 
-						if (try parser.parse(expression)) state = .write
+						if (try parser.parse(expression, linenr, &self.macros))
+							state = .write
 						else state = .dont_write;
 					},
-					.ignore, .find_label => {}
+					.ignore, .find_label_goto, .find_label_after => {}
 				}
 			},
 			.end => {
@@ -186,7 +216,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						if (scope == 0) {
 							log.errWithLineNr(
 								linenr,
-								"There can be no 'end' without if clause prior!", .{});
+								"There can be no 'end' without prior 'if' clause!", .{});
 							return error.Generic;
 						}
 					},
@@ -194,7 +224,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						if (ignored_scopes == 0) state = .write
 						else ignored_scopes -= 1;
 					},
-					.find_label => {}
+					.find_label_goto, .find_label_after => {}
 				}
 				scope -= 1;
 			},
@@ -202,7 +232,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				// TODO CONSIDER
 				if (scope > 0) {
 					log.errWithLineNr(linenr,
-						"You can't declare labels inside of if clauses!", .{});
+						"You can't declare labels inside of 'if' clauses!", .{});
 					return error.Generic;
 				}
 
@@ -212,41 +242,62 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						"label declaration expects label name!", .{});
 					return error.Generic;
 				}
+				if (label.len > _finding_label_buf.len) {
+					log.errWithLineNr(linenr,
+						"Label must be at most {d} characters (bytes) lnog!",
+						.{_finding_label_buf.len});
+					return error.Generic;
+				}
 
-				const new_entry = Position{ .offset = reader.seek, .linenr = linenr };
-				const cur_entry: Position = cur_entry: {
-					const maybe_kv = self.labels.fetchPut(label, new_entry) catch
-						return error.System;
-					break :cur_entry if (maybe_kv) |kv| kv.value else new_entry;
-				};
-				if (cur_entry.offset != new_entry.offset) {
+				if (redefinition: {
+					const maybe_kv = self.labels.fetchPut(label, Position{
+						.seek = reader.seek,
+						.linenr = linenr
+					}) catch return error.System;
+					break :redefinition maybe_kv == null or
+						maybe_kv.?.value.seek == reader.seek;
+				}) {
 					log.errWithLineNr(linenr,
 						"You can't declare the same label twice!", .{});
 					return error.Generic;
 				}
 
-				if (state == .find_label and std.mem.eql(u8, finding_label, label)) {
-					// TODO CONSIDER MOVE FUNC
-					state = .write;
-					scope = 0;
-					ignored_scopes = 0;
-					reader.seek = cur_entry.offset;
-					// ^ TODO TEST potential off by one error
-					linenr = cur_entry.linenr;
-					finding_label = "";
-				}
+				if (std.mem.eql(u8, finding_label, label)) switch (state) {
+					.find_label_goto => {
+						state = .write;
+						scope = 0;
+						ignored_scopes = 0;
+						finding_label = "";
+					},
+					.find_label_after => {
+						state = .write;
+						after_pos = Position{ .seek = reader.seek, .linenr = linenr };
+						reader.seek = last_jumped.seek;
+						linenr = last_jumped.linenr;
+						scope = last_jumped_scope;
+						ignored_scopes = last_ignored_scopes;
+						finding_label = "";
+					},
+					else => {}
+				};
 			},
 			.goto => {
 				if (state != .write) continue;
 
 				const label = trimWsEnd(cmd[iter.index..]);
 				if (label.len == 0) {
-					log.errWithLineNr(linenr, "goto statement expects label name!", .{});
+					log.errWithLineNr(linenr, "'goto' statement expects label name!", .{});
+					return error.Generic;
+				}
+				if (label.len > _finding_label_buf.len) {
+					log.errWithLineNr(linenr,
+						"Label must be at most {d} characters (bytes) lnog!",
+						.{_finding_label_buf.len});
 					return error.Generic;
 				}
 
 				const pos = self.labels.get(label) orelse {
-					state = .find_label;
+					state = .find_label_goto;
 					@memcpy(_finding_label_buf[0..label.len], label);
 					finding_label = _finding_label_buf[0..label.len];
 					continue;
@@ -255,20 +306,43 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				// TODO CONSIDER MOVE FUNC
 				scope = 0;
 				ignored_scopes = 0;
-				reader.seek = pos.offset;
+				reader.seek = pos.seek;
 				linenr = pos.linenr;
 			},
-			// TODO implement
 			.after => {
 				if (state != .write) continue;
+
 				const label = trimWsEnd(cmd[iter.index..]);
-				@memcpy(_after_label_buf[0..label.len], label);
-				after_label = _after_label_buf[0..label.len];
+				if (label.len == 0) {
+					after_state = .none;
+					continue;
+				}
+				if (label.len > _finding_label_buf.len) {
+					log.errWithLineNr(linenr,
+						"Label must be at most {d} characters (bytes) lnog!",
+						.{_finding_label_buf.len});
+					return error.Generic;
+				}
+
+				after_pos = self.labels.get(label) orelse {
+					state = .find_label_after;
+					@memcpy(_finding_label_buf[0..label.len], label);
+					finding_label = _finding_label_buf[0..label.len];
+
+					// TODO CONSIDER MOVE struct
+					last_jumped = Position{ .seek = reader.seek, .linenr = linenr };
+					last_jumped_scope = scope;
+					last_ignored_scopes = ignored_scopes;
+					continue;
+				};
 			},
 			.@"resume" => {
 				if (state != .write) continue;
-				reader.seek = last_jumped;
+				reader.seek = last_jumped.seek;
+				linenr = last_jumped.linenr;
 				scope = last_jumped_scope;
+				ignored_scopes = last_ignored_scopes;
+				after_state = .has;
 			},
 			.define => {
 				// TODO support expressions
@@ -278,7 +352,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				const key = key: {
 					const result = iter.next() orelse {
 						log.errWithLineNr(linenr,
-							"define statement needs variable name and value!", .{});
+							"'define' statement needs variable name and value!", .{});
 						return error.Generic;
 					};
 					try validateKey(result);
@@ -287,25 +361,19 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				const value = value: {
 					// TODO when implementing expression, you probably dont need trimming
 					const value_buf = trimWsEnd(cmd[iter.index..]);
-					break :value std.fmt.parseInt(MacroInt, value_buf, 10)
-					catch |e| switch (e) {
-						// TODO ALL CONSIDER REPLACE with only logs in arms, then a single
-						// return error.Generic
-						error.Overflow => {
-							log.errWithLineNr(
+					break :value std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| {
+						switch (e) {
+							error.Overflow => log.errWithLineNr(
 								linenr,
 								\\Number {s} is not representable!"
 								\\Only numbers from {d} to {d} are supported!
 								, .{value_buf, std.math.minInt(MacroInt),
 									std.math.maxInt(MacroInt)}
-							);
-							return error.Generic;
-						},
-						error.InvalidCharacter => {
-							log.errWithLineNr(linenr,
-								"Value '{s}' is not a valid number!", .{value_buf});
-							return error.Generic;
+							),
+							error.InvalidCharacter => log.errWithLineNr(linenr,
+								"Value '{s}' is not a valid number!", .{value_buf})
 						}
+						return error.Generic;
 					};
 				};
 
@@ -322,7 +390,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 					if (cand == null or subkeyword != null) {
 						log.errWithLineNr(linenr,
-							"write statement expects a single variable name!", .{});
+							"'write' statement expects a single variable name!", .{});
 						return error.Generic;
 					}
 
@@ -342,7 +410,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 					if (iter.next() != null) {
 						log.errWithLineNr(linenr,
-							"'back' only takes one argument!", .{});
+							"'back' statement only takes one argument!", .{});
 						return error.Generic;
 					}
 
@@ -370,9 +438,20 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 		}
 	}
 
-	// TODO ERRHANDLE state != .write
+	switch (state) {
+		.write => {},
+		.dont_write, .ignore => {
+			log.err(
+				"'if' clause expects scope termination with corresponding 'end' keyword!",
+				.{});
+			return error.Generic;
+		},
+		.find_label_goto, .find_label_after => {
+			log.err("No such label '{s}'!", .{finding_label});
+			return error.Generic;
+		},
+	}
 
-	// TODO error on label defined on positive scope
 	// TODO FINAL ADD new kind of verbose code
 	// TODO PLAN
 	// for every line

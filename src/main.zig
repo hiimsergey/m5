@@ -1,3 +1,5 @@
+// TODO DEBUG blank line problem ...
+//     while loop stops after first blank line
 // TODO new arg table
 // --help help
 // -safe exit with error if encountering undefined variable, treat it as false otherwise
@@ -20,8 +22,6 @@
 // input slice
 // defines
 
-// TODO prevent file-defined macros to leak into other files
-
 const std = @import("std");
 const log = @import("log.zig");
 
@@ -33,11 +33,24 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\lt - a simple text file processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/lt)
-	\\v0.1.1   GPL-3.0 license
+	\\v0.2.0   GPL-3.0 license
 	\\
-	\\TODO
+	\\Usage: lt [<options>] <input>
+	\\
+	\\Options:
+	\\  --help               Print this message
+	\\  --verbose            Log information while interpreting
+	\\  --safe               Exit with error on encountering undefined variable
+	\\
+	\\  -o:<file>            Write result into file
+	\\                       If not given, write to stdout
+	\\  -p:<text>            Set string marking beginning of lt directive lines
+	\\                       Must be given
+	\\  -d:<key>[=<number>]  Define variable with value
+	\\                       If value not given, default is 1
 	\\
 ;
+// TODO CONSIDER find /tmp location and open the same file (truncate ofc)
 const stdout_proxy_basename = ".lt-stdout-proxy.tmp";
 
 const stdout_file = File.stdout();
@@ -46,11 +59,12 @@ var stdout_wrapper = stdout_file.writer(&stdout_buf);
 const stdout = &stdout_wrapper.interface;
 
 pub fn main() u8 {
+	defer log.stderr.flush() catch {};
+
 	realMain() catch |e| switch (e) {
 		error.Generic => return 1,
 		error.System => {
 			log.err("System failure!", .{});
-			log.stderr.flush() catch {};
 			return 71;
 		}
 	};
@@ -58,8 +72,6 @@ pub fn main() u8 {
 }
 
 fn realMain() error{Generic, System}!void {
-	defer log.stderr.flush() catch {};
-
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
 	const gpa = aw.allocator(std.heap.smp_allocator);
@@ -91,16 +103,24 @@ fn realMain() error{Generic, System}!void {
 			};
 		}
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
-			log.stderr.print(help_text, .{}) catch {};
+			stdout.print(help_text, .{}) catch {};
+			stdout.flush() catch {};
 			return error.Generic;
 		}
-		// TODO implemnt
-		else if (std.mem.eql(u8, arg[1..], "-safe")) {
-			ctx.flags.safe = true;
-		}
-		// TODO implemnt
+		// TODO PLAN implement
+		// print every defined variable
+		// red if 0, green otherwise (or any other color)
+		// using ANSI codes, print input & output files and linenr
+		// print just defined variables
+		// print when encountering undefined variable
 		else if (std.mem.eql(u8, arg[1..], "-verbose")) {
 			ctx.flags.verbose = true;
+		}
+		// TODO PLAN implement
+		// when encountering undefined variable, exit with error
+		else if (std.mem.eql(u8, arg[1..], "-safe")) {
+			// Shoutout to @MrMineDe for forcing me to implement this feature.
+			ctx.flags.safe = true;
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
