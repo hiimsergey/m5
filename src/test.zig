@@ -148,6 +148,8 @@ test "Invalid if-block scoping" {
 	defer c0.deinit();
 	try c0.expectResult(1, "");
 
+	// TODO This does not work! It only works because it needs the same thing from above by coincidence!
+	// 2 setTestFile calls in one test break the test!
 	try setTestFile(
 		\\foo bar
 		\\m5 else
@@ -158,25 +160,114 @@ test "Invalid if-block scoping" {
 	var c1 = try Command.init(&.{m5, "-p", "m5", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
-	// TODO TEST missing if
-	// TODO TEST missing end
-	// TODO TEST too much end
 }
 
-test "Else keyword" {
-	// TODO TEST else
-	// TODO TEST elsefoobar
-	// TODO TEST else foobar
-	// TODO TEST else if condition
-}
-
-test "Nested if-blocks" {
+test "Else keyword - normal else" {
 	try openTestFile();
 	defer test_file.close();
 
-	const cmd = [_][]const u8{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path};
+	try setTestFile(
+		\\m5 if ALICE
+		\\foo bar
+		\\m5 else
+		\\baz buzz
+		\\m5 end
+	);
 
-	// TODO NOW
+	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(0, "baz buzz\n");
+}
+
+test "Else keyword - normal if" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\foo bar
+		\\m5 else
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(0, "foo bar\n");
+}
+
+test "Else keyword - elseBOB if" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\foo bar
+		\\m5 elseBOB
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(1, "");
+}
+
+test "Else keyword - elseBOB else" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\foo bar
+		\\m5 elseBOB
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-DBOB", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(1, "");
+}
+
+test "Else keyword - else BOB else" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\foo bar
+		\\m5 else BOB
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-DBOB", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(1, "");
+}
+
+test "Else keyword - else if BOB else" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\foo bar
+		\\m5 else if BOB
+		\\baz buzz
+		\\m5 end
+	);
+
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-DBOB", test_file_path});
+	defer c0.deinit();
+	try c0.expectResult(0, "baz buzz\n");
+}
+
+test "Nested if-blocks - Correct" {
+	try openTestFile();
+	defer test_file.close();
+
 	try setTestFile(
 		\\m5 if ALICE
 		\\m5 if BOB
@@ -186,10 +277,16 @@ test "Nested if-blocks" {
 		\\
 	);
 
-	var c0 = try Command.init(&cmd);
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "hi alice and bob\n");
 
+}
+
+test "Nested if-blocks - missing end" {
+	try openTestFile();
+	defer test_file.close();
+
 	try setTestFile(
 		\\m5 if ALICE
 		\\m5 if BOB
@@ -198,14 +295,97 @@ test "Nested if-blocks" {
 		\\
 	);
 
-	var c1 = try Command.init(&cmd);
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
+}
 
-	// TODO NOW
-	// TODO TEST missing if
-	// TODO TEST missing end
-	// TODO TEST too much end
+test "Nested if-blocks - missing if" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\hi alice and bob
+		\\m5 end
+		\\
+	);
+
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	defer c1.deinit();
+	try c1.expectResult(1, "");
+}
+
+test "Nested if-blocks - too much end" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\m5 if BOB
+		\\hi alice and bob
+		\\m5 end
+		\\m5 end
+		\\m5 end
+		\\
+	);
+
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	defer c1.deinit();
+	try c1.expectResult(1, "");
+}
+
+test "Nested if-blocks - if and end at wrong pos 1" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 if ALICE
+		\\m5 end
+		\\m5 end
+		\\m5 if BOB
+		\\hi alice and bob
+		\\
+	);
+
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	defer c1.deinit();
+	try c1.expectResult(1, "");
+}
+
+test "Nested if-blocks - if and end at wrong pos 2" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 end
+		\\m5 if ALICE
+		\\m5 end
+		\\m5 if BOB
+		\\hi alice and bob
+		\\
+	);
+
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	defer c1.deinit();
+	try c1.expectResult(1, "");
+}
+
+test "Nested if-blocks - if and end at wrong pos 3" {
+	try openTestFile();
+	defer test_file.close();
+
+	try setTestFile(
+		\\m5 end
+		\\m5 end
+		\\hi alice and bob
+		\\m5 if ALICE
+		\\m5 if BOB
+		\\
+	);
+
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	defer c1.deinit();
+	try c1.expectResult(1, "");
 }
 
 test {
