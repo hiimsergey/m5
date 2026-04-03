@@ -14,6 +14,7 @@ const ConditionIterator = struct {
 
 	pub fn next(self: *ConditionIterator) ?[]const u8 {
 		if (self.expression.len == 0) return null;
+		// TODO REPLACE with Context.trimWStart
 		self.expression = std.mem.trimStart(u8, self.expression, " ");
 
 		if (self.expression[0] == '(') return self.endBracket();
@@ -31,6 +32,10 @@ const ConditionIterator = struct {
 		return result;
 	}
 
+	// TODO this function should errhandle the condition
+	/// Called when first character in buffer is opening parenthesis.
+	/// Returns slice ending with its corresponding closing parenthesis and advances
+	/// iterator.
 	fn endBracket(self: *ConditionIterator) []const u8 {
 		var scope: usize = 1;
 		for (1..self.expression.len) |i| switch (self.expression[i]) {
@@ -147,46 +152,43 @@ fn parseCmp(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 	return value > 0;
 }
 
-fn termValue(term: []const u8, linenr: usize, ctx: *const Context) MacroInt {
+fn termValue(
+	term: []const u8,
+	linenr: usize,
+	ctx: *const Context
+) error{Generic}!MacroInt {
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
-
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
-	const value: MacroInt = std.fmt.parseInt(MacroInt, trimmed, 10) catch
-		ctx.macros.get(trimmed)
-	orelse value: {
-		if (!ctx.flags.safe) break :value 0;
 
-		log.errWithLineNr(linenr,
-			"Macro '{s}' is undefined! (error shown because of --safe)",
-			.{trimmed}
-		);
-		log.stderr.flush() catch {};
-		// TODO once we've implemented checking parse* functions, we can return
-		// an error instead!
-		std.process.exit(1);
+	const value: MacroInt = std.fmt.parseInt(MacroInt, trimmed, 10) catch |e| value: {
+		if (e == error.Overflow) {
+			log.errWithLineNr(linenr,
+				"Absolute value of '{s}' is too big to represent!",
+				.{trimmed});
+			return error.Generic;
+		}
+
+		// TODO ERRHANDLE trimmed contains banned_chars
+
+		break :value ctx.macros.get(trimmed) orelse {
+			if (!ctx.flags.safe) break :value 0;
+
+			log.errWithLineNr(linenr,
+				"Macro '{s}' is undefined! (error shown because of --safe)",
+				.{trimmed}
+			);
+			log.stderr.flush() catch {};
+			// TODO CHECK that this leads to proper shutdown
+			return error.Generic;
+		};
 	};
 
 	if (!negate) return value;
 	return @intFromBool(value == 0);
 }
 
-/// Return whether given string could be successfully parsed into a number.
-/// Ignores underscore characters, just like `std.fmt.parseInt` does.
-fn isNumber(buf: []const u8) bool {
-	for (buf) |c| switch (c) {
-		'0'...'9', '_' => continue,
-		else => return false
-	};
-	return true;
-}
-
-// TODO FINAL CONSIDER replacing all this with controlled checks in the ConditionIterator
-// ^ or the parse functions
-// TODO FINAL CHECK if keeping this function, it should probably be private, since it's
-// ^ called in parse()
-/// Checks `expression` on syntactical validity.
-/// Logs on error.
+// TODO FINAL REMOVE
 fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 	var scope: usize = 0;
 	var state = ParseState.expecting_expression;
@@ -331,13 +333,15 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 	}
 }
 
+// TODO REMOVE
 /// Checks `buf` on whether it represents a an unsigned 32-bit integer.
 /// Logs on error.
 fn validateNumber(buf: []const u8, linenr: usize) error{Generic}!void {
 	_ = std.fmt.parseInt(u32, buf, 10) catch |e| {
 		switch (e) {
+			// TODO add "only X to Y" comment
 			error.Overflow => log.errWithLineNr(linenr,
-				"Absolute value of '{s}' is too big to represent!",
+				"Value of '{s}' is too big to represent!",
 				.{buf}),
 			error.InvalidCharacter => log.errWithLineNr(linenr,
 				"Value '{s}' is not a valid number!", .{buf})
@@ -345,3 +349,22 @@ fn validateNumber(buf: []const u8, linenr: usize) error{Generic}!void {
 		return error.Generic;
 	};
 }
+
+// TODO ADD test for \t characters
+// TODO ADD test for too much whitespace
+// TODO ADD test for mixed whitespace
+// TODO TEST these scenarios are errhandled:
+//   "Expected expression, got '('!", .{});
+//   "Unexpected ')' without opening bracket!", .{});
+//   "Expected expression, got ')'!", .{});
+//   "Invalid character '-'!", .{});
+//   "Expected operator, got number!", .{});
+//   "Expected operator, got '_'!", .{});
+//   "Expected expression, got operator '{c}'!",
+//   "Expected expression, got comparison operator '{c}'!",
+//   "Expected operator, got '!'!", .{});
+//   "Unexpected '!' in number!", .{});
+//   "Unexpected character '{c}' in number!",
+//   "Expected operator, got '{s}'!",
+//   "Unclosed parenthesis!", .{});
+//   "Expected expression at the end!", .{});

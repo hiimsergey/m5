@@ -7,11 +7,11 @@ const File = std.fs.File;
 const MacroInt = Context.MacroInt;
 
 const help_text =
-	\\lt - a simple text file processor
-	\\by Sergey Lavrent (https://github.com/hiimsergey/lt)
+	\\m5 - a simple text file processor
+	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
 	\\v0.2.0   GPL-3.0 license
 	\\
-	\\Usage: lt [<options>] <input>
+	\\Usage: m5 [<options>] <input>
 	\\
 	\\Options:
 	\\  --help               Print this message
@@ -20,14 +20,14 @@ const help_text =
 	\\
 	\\  -o:<file>            Write result into file
 	\\                       If not given, write to stdout
-	\\  -p:<text>            Set string marking beginning of lt directive lines
+	\\  -p:<text>            Set string marking beginning of m5 directive lines
 	\\                       Must be given
 	\\  -d:<key>[=<number>]  Define variable with value
 	\\                       If value not given, default is 1
 	\\
 ;
 // TODO CONSIDER find /tmp location and open the same file (truncate ofc)
-const stdout_proxy_basename = ".lt-stdout-proxy.tmp";
+const stdout_proxy_basename = ".m5-stdout-proxy.tmp";
 
 const stdout_file = File.stdout();
 var stdout_buf: [1024]u8 = undefined;
@@ -47,8 +47,9 @@ pub fn main() u8 {
 	return 0;
 }
 
+// TODO CONSIDER MOVE
 pub const validateKey = struct {
-	const banned_chars = "+-&|!<>() \t";
+	const banned_chars = "+-*/&|!<>() \t";
 
 	/// Returns an error and logs if `buf` can't be a valid key.
 	fn f(buf: []const u8) error{Generic}!void {
@@ -182,7 +183,7 @@ fn realMain() error{Generic, System}!void {
 		catch |e| switch (e) {
 			error.PathAlreadyExists => {
 				log.err(
-					\\lt uses the temporary file '{s}' as a proxy for stdout
+					\\m5 uses the temporary file '{s}' as a proxy for stdout
 					\\but it already exists!
 					\\If you need to write to stdout, please remove it!
 					, .{stdout_proxy_basename}
@@ -207,7 +208,7 @@ fn realMain() error{Generic, System}!void {
 
 		cwd.deleteFile(stdout_proxy_basename) catch {
 			log.err(
-				\\lt uses the temporary file '{s}' as a proxy for stdout
+				\\m5 uses the temporary file '{s}' as a proxy for stdout
 				\\but it failed to delete it afterwards! Sorry! :(
 				, .{stdout_proxy_basename}
 			);

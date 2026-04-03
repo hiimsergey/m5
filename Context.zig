@@ -361,6 +361,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							"'define' statement needs variable name and value!", .{});
 						return error.Generic;
 					};
+					// TODO TEST invalid key in 'define'
 					try validateKey(result);
 					break :key result;
 				};

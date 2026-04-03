@@ -15,7 +15,7 @@ pub fn err(comptime fmt: []const u8, args: anytype) void {
 pub fn errWithHelp(comptime fmt: []const u8, args: anytype) void {
 	stderr.print(error_tag, .{}) catch {};
 	stderr.print(fmt ++ "\n", args) catch {};
-	stderr.print("See `lt --help` for correct usage!\n", .{}) catch {};
+	stderr.print("See `m5 --help` for correct usage!\n", .{}) catch {};
 }
 
 pub fn errWithLineNr(linenr: usize, comptime fmt: []const u8, args: anytype) void {

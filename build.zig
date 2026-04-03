@@ -8,7 +8,7 @@ pub fn build(b: *Build) void {
 
 	// Executable declaration
 	const exe = b.addExecutable(.{
-		.name = "lt",
+		.name = "m5",
 		.root_module = b.createModule(.{
 			.root_source_file = b.path("main.zig"),
 			.target = target,
