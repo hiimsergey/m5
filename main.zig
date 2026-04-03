@@ -1,5 +1,3 @@
-// TODO DEBUG blank line problem ...
-//     while loop stops after first blank line
 // TODO new arg table
 // --help help
 // -safe exit with error if encountering undefined variable, treat it as false otherwise

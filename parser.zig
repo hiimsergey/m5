@@ -2,9 +2,7 @@ const std = @import("std");
 const log = @import("log.zig");
 
 const Context = @import("Context.zig");
-
 const MacroInt = Context.MacroInt;
-const MacroMap = Context.MacroMap;
 
 const ConditionIterator = struct {
 	expression: []const u8,
@@ -64,33 +62,33 @@ const ParseState = enum(u8) {
 pub fn parse(
 	expression: []const u8,
 	linenr: usize,
-	macros: *const MacroMap
+	ctx: *const Context
 ) error{Generic}!bool {
 	try validate(expression, linenr);
-	return parseOr(expression, macros);
+	return parseOr(expression, linenr, ctx);
 }
 
-fn parseOr(condition: []const u8, macros: *const MacroMap) bool {
+fn parseOr(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 	var result = false;
 	
 	var it = ConditionIterator.init(condition, '|');
 	while (it.next()) |slice| {
 		// TODO CONSIDER use endBracket somewhere
-		const parse_result = if (slice[0] == '(') parseOr(slice[1..], macros)
-			else parseAnd(slice, macros);
+		const parse_result = if (slice[0] == '(') parseOr(slice[1..], linenr, ctx)
+			else parseAnd(slice, linenr, ctx);
 		result = result or parse_result;
 	}
 	return result;
 }
 
-fn parseAnd(condition: []const u8, macros: *const MacroMap) bool {
+fn parseAnd(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 	var result = true;
 	var it = ConditionIterator.init(condition, '&');
 
 	while (it.next()) |slice| {
 		// TODO CONSIDER use endBracket somewhere
-		const parse_result = if (slice[0] == '(') parseOr(slice[1..], macros)
-			else parseCmp(slice, macros);
+		const parse_result = if (slice[0] == '(') parseOr(slice[1..], linenr, ctx)
+			else parseCmp(slice, linenr, ctx);
 		result = result and parse_result;
 	}
 	return result;
@@ -103,39 +101,39 @@ fn parseAnd(condition: []const u8, macros: *const MacroMap) bool {
 //     after handling
 //     math expressions
 // optimize bool expression and other algorithms
-fn parseCmp(condition: []const u8, macros: *const MacroMap) bool {
+fn parseCmp(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = termValue(condition[0..i], macros);
+				const lhs = termValue(condition[0..i], linenr, ctx);
 
 				if (condition[i + 1] == '=') {
-					const rhs = termValue(condition[i + 2..], macros);
+					const rhs = termValue(condition[i + 2..], linenr, ctx);
 					return lhs >= rhs;
 				}
-				const rhs = termValue(condition[i + 1..], macros);
+				const rhs = termValue(condition[i + 1..], linenr, ctx);
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = termValue(condition[0..i], macros);
+				const lhs = termValue(condition[0..i], linenr, ctx);
 
 				if (condition[i + 1] == '=') {
-					const rhs = termValue(condition[i + 2..], macros);
+					const rhs = termValue(condition[i + 2..], linenr, ctx);
 					return lhs <= rhs;
 				}
-				const rhs = termValue(condition[i + 1..], macros);
+				const rhs = termValue(condition[i + 1..], linenr, ctx);
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = termValue(condition[0..i], macros);
-				const rhs = termValue(condition[i + 1..], macros);
+				const lhs = termValue(condition[0..i], linenr, ctx);
+				const rhs = termValue(condition[i + 1..], linenr, ctx);
 				return lhs == rhs;
 			},
 			'!' => {
 				// foo != bar
 				if (condition[i + 1] == '=') {
-					const lhs = termValue(condition[0..i], macros);
-					const rhs = termValue(condition[i + 2..], macros);
+					const lhs = termValue(condition[0..i], linenr, ctx);
+					const rhs = termValue(condition[i + 2..], linenr, ctx);
 					return lhs != rhs;
 				}
 				// !foo
@@ -145,17 +143,29 @@ fn parseCmp(condition: []const u8, macros: *const MacroMap) bool {
 		}
 	}
 
-	const value: MacroInt = termValue(condition, macros);
+	const value: MacroInt = termValue(condition, linenr, ctx);
 	return value > 0;
 }
 
-fn termValue(term: []const u8, macros: *const MacroMap) MacroInt {
+fn termValue(term: []const u8, linenr: usize, ctx: *const Context) MacroInt {
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
 	const value: MacroInt = std.fmt.parseInt(MacroInt, trimmed, 10) catch
-		macros.get(trimmed) orelse 0;
+		ctx.macros.get(trimmed)
+	orelse value: {
+		if (!ctx.flags.safe) break :value 0;
+
+		log.errWithLineNr(linenr,
+			"Macro '{s}' is undefined! (error shown because of --safe)",
+			.{trimmed}
+		);
+		log.stderr.flush() catch {};
+		// TODO once we've implemented checking parse* functions, we can return
+		// an error instead!
+		std.process.exit(1);
+	};
 
 	if (!negate) return value;
 	return @intFromBool(value == 0);
@@ -172,6 +182,7 @@ fn isNumber(buf: []const u8) bool {
 }
 
 // TODO FINAL CONSIDER replacing all this with controlled checks in the ConditionIterator
+// ^ or the parse functions
 // TODO FINAL CHECK if keeping this function, it should probably be private, since it's
 // ^ called in parse()
 /// Checks `expression` on syntactical validity.

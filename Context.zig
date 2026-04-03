@@ -174,7 +174,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							return error.Generic;
 						}
 
-						if (try parser.parse(expression, linenr, &self.macros)) continue;
+						if (try parser.parse(expression, linenr, self)) continue;
 						state = .dont_write;
 					},
 					.dont_write, .ignore => ignored_scopes += 1,
@@ -198,7 +198,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							return error.Generic;
 						}
 
-						if (try parser.parse(expression, linenr, &self.macros))
+						if (try parser.parse(expression, linenr, self))
 							state = .write
 						else state = .dont_write;
 					},
@@ -395,7 +395,18 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 					break :key cand.?;
 				};
-				const value: MacroInt = self.macros.get(key) orelse 0;
+				const value: MacroInt = self.macros.get(key) orelse value: {
+					if (!self.flags.safe) break :value 0;
+
+					log.errWithLineNr(linenr,
+						"Macro '{s}' is undefined! (error shown because of --safe)",
+						.{key}
+					);
+					// TODO once we've implemented checking parse* functions, we can return
+					// an error instead!
+					log.stderr.flush() catch {};
+					return error.Generic;
+				};
 
 				writer.print("{d}", .{value}) catch return error.System;
 			},
