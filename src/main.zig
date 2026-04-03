@@ -21,6 +21,9 @@
 // verbose
 // input slice
 // defines
+// TODO CONSIDER REMOVE -o flag in favor of second positional
+// ^ maybe its easier to do tty checking that way
+// TODO any text after 'end' and 'else' (not 'else if') should be allowed for commenting reasons
 
 const std = @import("std");
 const log = @import("log.zig");
@@ -71,6 +74,37 @@ pub fn main() u8 {
 	return 0;
 }
 
+pub const validateKey = struct {
+	const banned_chars = "+-&|!<>() \t";
+
+	/// Returns an error and logs if `buf` can't be a valid key.
+	fn f(buf: []const u8) error{Generic}!void {
+		if (buf.len == 0) {
+			log.err("You can't define a macro with an empty name!", .{});
+			return error.Generic;
+		}
+		for (buf) |c| if (std.mem.containsAtLeastScalar(u8, banned_chars, 1, c)) {
+			log.err("Key '{s}' contains forbidden character '{c}'!", .{buf, c});
+			return error.Generic;
+		};
+		if (isNumber(buf)) {
+			log.err("Keys can't be numbers!", .{});
+			return error.Generic;
+		}
+	}
+
+	fn isNumber(buf: []const u8) bool {
+		for (buf) |c| switch (c) {
+			'0'...'9', '_' => continue,
+			else => return false
+		};
+		return true;
+	}
+}.f;
+
+// TODO TEST non-ascii define names, like cyrillic
+// TODO FINAL ALL TEST log.err* branches
+
 fn realMain() error{Generic, System}!void {
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
@@ -105,7 +139,7 @@ fn realMain() error{Generic, System}!void {
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
 			stdout.print(help_text, .{}) catch {};
 			stdout.flush() catch {};
-			return error.Generic;
+			return;
 		}
 		// TODO PLAN implement
 		// print every defined variable
@@ -243,33 +277,3 @@ fn readDefinition(flag: []const u8) error{Generic}!struct { []const u8, MacroInt
 	try validateKey(key_cand);
 	return .{key_cand, value};
 }
-
-pub const validateKey = struct {
-	const banned_chars = "+-&|!<>() \t";
-
-	/// Returns an error and logs if `buf` can't be a valid key.
-	fn f(buf: []const u8) error{Generic}!void {
-		if (buf.len == 0) {
-			log.err("You can't define a macro with an empty name!", .{});
-			return error.Generic;
-		}
-		for (buf) |c| if (std.mem.containsAtLeastScalar(u8, banned_chars, 1, c)) {
-			log.err("Key '{s}' contains forbidden character '{c}'!", .{buf, c});
-			return error.Generic;
-		};
-		if (isNumber(buf)) {
-			log.err("Keys can't be numbers!", .{});
-			return error.Generic;
-		}
-	}
-
-	fn isNumber(buf: []const u8) bool {
-		for (buf) |c| switch (c) {
-			'0'...'9', '_' => continue,
-			else => return false
-		};
-		return true;
-	}
-}.f;
-
-// TODO TEST non-ascii define names, like cyrillic

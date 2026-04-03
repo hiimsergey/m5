@@ -73,8 +73,8 @@ pub fn parse(
 fn parseOr(condition: []const u8, macros: *const MacroMap) bool {
 	var result = false;
 	
-	var iter = ConditionIterator.init(condition, '|');
-	while (iter.next()) |slice| {
+	var it = ConditionIterator.init(condition, '|');
+	while (it.next()) |slice| {
 		// TODO CONSIDER use endBracket somewhere
 		const parse_result = if (slice[0] == '(') parseOr(slice[1..], macros)
 			else parseAnd(slice, macros);
@@ -85,9 +85,9 @@ fn parseOr(condition: []const u8, macros: *const MacroMap) bool {
 
 fn parseAnd(condition: []const u8, macros: *const MacroMap) bool {
 	var result = true;
-	var iter = ConditionIterator.init(condition, '&');
+	var it = ConditionIterator.init(condition, '&');
 
-	while (iter.next()) |slice| {
+	while (it.next()) |slice| {
 		// TODO CONSIDER use endBracket somewhere
 		const parse_result = if (slice[0] == '(') parseOr(slice[1..], macros)
 			else parseCmp(slice, macros);
@@ -139,23 +139,20 @@ fn parseCmp(condition: []const u8, macros: *const MacroMap) bool {
 			else => continue
 		}
 	}
-	const value = termValue(condition, macros);
+	const value: MacroInt = termValue(condition, macros);
 	return value > 0;
 }
 
-// TODO CONSIDER returning u32s already
 fn termValue(term: []const u8, macros: *const MacroMap) MacroInt {
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
-
-	// TODO RENAME here
-	const trimmed_number = std.fmt.parseInt(MacroInt, trimmed, 10) catch
+	const trimmed_parsed = std.fmt.parseInt(MacroInt, trimmed, 10) catch
 		return macros.get(trimmed) orelse 0;
 
-	if (!negate) return trimmed_number;
-	return @intFromBool(trimmed_number == 0);
+	if (!negate) return trimmed_parsed;
+	return @intFromBool(trimmed_parsed == 0);
 }
 
 /// Return whether given string could be successfully parsed into a number.

@@ -139,7 +139,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	}) {
 		const cmd = cmd: {
 			const line = allocating.written();
-			const line_trimmed = trimWsStart(line);
+			const line_trimmed = trimWStart(line);
 			if (!startsWith(line_trimmed, self.prefix.?)) {
 				if (state == .write)
 					writer.print("{s}\n", .{line}) catch return error.System;
@@ -147,9 +147,9 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			}
 			break :cmd line_trimmed[self.prefix.?.len..];
 		};
-		var iter = std.mem.tokenizeAny(u8, cmd, " \t");
+		var it = std.mem.tokenizeAny(u8, cmd, " \t");
 
-		const keyword: []const u8 = iter.next() orelse {
+		const keyword: []const u8 = it.next() orelse {
 			log.errWithLineNr(
 				linenr, "Expected keyword, found end of line!", .{});
 			return error.Generic;
@@ -164,7 +164,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				scope += 1;
 				switch (state) {
 					.write => {
-						const expression = trimWsEnd(cmd[iter.index..]);
+						const expression = trimWEnd(cmd[it.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
 								"'if' clause expects expression!", .{});
@@ -183,12 +183,12 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				switch (state) {
 					.write => state = .ignore,
 					.dont_write => {
-						if (iter.next() == null) {
+						if (it.next() == null) {
 							state = .write;
 							continue;
 						}
 
-						const expression = trimWsEnd(cmd[iter.index..]);
+						const expression = trimWEnd(cmd[it.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
 								"'else' clause expects expression!", .{});
@@ -203,7 +203,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				}
 			},
 			.end => {
-				if (iter.next() != null) {
+				if (it.next() != null) {
 					log.errWithLineNr(
 						linenr,
 						"There can be nothing following 'end'!", .{});
@@ -236,7 +236,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					return error.Generic;
 				}
 
-				const label = trimWsEnd(cmd[iter.index..]);
+				const label = trimWEnd(cmd[it.index..]);
 				if (label.len == 0) {
 					log.errWithLineNr(linenr,
 						"label declaration expects label name!", .{});
@@ -244,7 +244,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				}
 				if (label.len > _finding_label_buf.len) {
 					log.errWithLineNr(linenr,
-						"Label must be at most {d} characters (bytes) lnog!",
+						"Label must be at most {d} characters (bytes) long!",
 						.{_finding_label_buf.len});
 					return error.Generic;
 				}
@@ -284,9 +284,10 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			.goto => {
 				if (state != .write) continue;
 
-				const label = trimWsEnd(cmd[iter.index..]);
+				const label = trimWEnd(cmd[it.index..]);
 				if (label.len == 0) {
-					log.errWithLineNr(linenr, "'goto' statement expects label name!", .{});
+					log.errWithLineNr(linenr, "'goto' statement expects label name!",
+						.{});
 					return error.Generic;
 				}
 				if (label.len > _finding_label_buf.len) {
@@ -312,7 +313,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			.after => {
 				if (state != .write) continue;
 
-				const label = trimWsEnd(cmd[iter.index..]);
+				const label = trimWEnd(cmd[it.index..]);
 				if (label.len == 0) {
 					after_state = .none;
 					continue;
@@ -350,7 +351,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (state != .write) continue;
 
 				const key = key: {
-					const result = iter.next() orelse {
+					const result = it.next() orelse {
 						log.errWithLineNr(linenr,
 							"'define' statement needs variable name and value!", .{});
 						return error.Generic;
@@ -360,7 +361,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				};
 				const value = value: {
 					// TODO when implementing expression, you probably dont need trimming
-					const value_buf = trimWsEnd(cmd[iter.index..]);
+					const value_buf = trimWEnd(cmd[it.index..]);
 					break :value std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| {
 						switch (e) {
 							error.Overflow => log.errWithLineNr(
@@ -385,8 +386,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (state != .write) continue;
 
 				const key = key: {
-					const cand = iter.next();
-					const subkeyword = iter.next();
+					const cand = it.next();
+					const subkeyword = it.next();
 
 					if (cand == null or subkeyword != null) {
 						log.errWithLineNr(linenr,
@@ -406,9 +407,9 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (state != .write) continue;
 
 				const n: u64 = n: {
-					const buf = iter.next() orelse break :n 1;
+					const buf = it.next() orelse break :n 1;
 
-					if (iter.next() != null) {
+					if (it.next() != null) {
 						log.errWithLineNr(linenr,
 							"'back' statement only takes one argument!", .{});
 						return error.Generic;
@@ -476,12 +477,12 @@ fn startsWith(haystack: []const u8, needle: []const u8) bool {
 }
 
 /// Wrapper around std.mem.trimStart
-fn trimWsStart(buf: []const u8) []const u8 {
+fn trimWStart(buf: []const u8) []const u8 {
 	return std.mem.trimStart(u8, buf, " \t");
 }
 
 /// Wrapper around std.mem.trimEnd
-fn trimWsEnd(buf: []const u8) []const u8 {
+fn trimWEnd(buf: []const u8) []const u8 {
 	return std.mem.trimEnd(u8, buf, " \t");
 }
 
