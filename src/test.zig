@@ -147,19 +147,6 @@ test "Invalid if-block scoping" {
 	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(1, "");
-
-	// TODO This does not work! It only works because it needs the same thing from above by coincidence!
-	// 2 setTestFile calls in one test break the test!
-	try setTestFile(
-		\\foo bar
-		\\m5 else
-		\\baz buzz
-		\\m5 end
-	);
-
-	var c1 = try Command.init(&.{m5, "-p", "m5", test_file_path});
-	defer c1.deinit();
-	try c1.expectResult(1, "");
 }
 
 test "Else keyword - normal else" {
