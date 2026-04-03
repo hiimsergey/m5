@@ -132,13 +132,19 @@ fn parseCmp(condition: []const u8, macros: *const MacroMap) bool {
 				return lhs == rhs;
 			},
 			'!' => {
-				const lhs = termValue(condition[0..i], macros);
-				const rhs = termValue(condition[i + 2..], macros);
-				return lhs != rhs;
+				// foo != bar
+				if (condition[i + 1] == '=') {
+					const lhs = termValue(condition[0..i], macros);
+					const rhs = termValue(condition[i + 2..], macros);
+					return lhs != rhs;
+				}
+				// !foo
+				break;
 			},
 			else => continue
 		}
 	}
+
 	const value: MacroInt = termValue(condition, macros);
 	return value > 0;
 }
@@ -148,11 +154,11 @@ fn termValue(term: []const u8, macros: *const MacroMap) MacroInt {
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
 
 	const trimmed = std.mem.trim(u8, trim_nots, " \t");
-	const trimmed_parsed = std.fmt.parseInt(MacroInt, trimmed, 10) catch
-		return macros.get(trimmed) orelse 0;
+	const value: MacroInt = std.fmt.parseInt(MacroInt, trimmed, 10) catch
+		macros.get(trimmed) orelse 0;
 
-	if (!negate) return trimmed_parsed;
-	return @intFromBool(trimmed_parsed == 0);
+	if (!negate) return value;
+	return @intFromBool(value == 0);
 }
 
 /// Return whether given string could be successfully parsed into a number.
@@ -296,8 +302,8 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 			.expecting_expression => state = .in_expression,
 			.expecting_operator => {
 				log.errWithLineNr(linenr,
-					"Expected operator, got '{c}'!",
-					.{expression[i]});
+					"Expected operator, got '{s}'!",
+					.{expression[i..]});
 				return error.Generic;
 			}
 		},
