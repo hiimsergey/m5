@@ -186,15 +186,21 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				switch (state) {
 					.write => state = .ignore,
 					.dont_write => {
-						if (it.next() == null) {
+						const subkeyword = it.next() orelse {
 							state = .write;
 							continue;
+						};
+						if (!std.mem.eql(u8, subkeyword, "if")) {
+							log.errWithLineNr(linenr,
+								"'else' expects nothing or 'if', got '{s}'!",
+								.{subkeyword});
+							return error.Generic;
 						}
 
 						const expression = trimWEnd(cmd[it.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
-								"'else' clause expects expression!", .{});
+								"'else if' clause expects expression!", .{});
 							return error.Generic;
 						}
 

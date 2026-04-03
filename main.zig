@@ -1,28 +1,3 @@
-// TODO new arg table
-// --help help
-// -safe exit with error if encountering undefined variable, treat it as false otherwise
-//     ^ TODO give shoutout
-// -verbose verbose
-// -o output
-// -p prefix
-// -d define
-// -flag invalid flag
-// input
-//
-// argtable layout
-// $0
-// input
-// prefix
-//
-// stack layout
-// safe
-// verbose
-// input slice
-// defines
-// TODO CONSIDER REMOVE -o flag in favor of second positional
-// ^ maybe its easier to do tty checking that way
-// TODO any text after 'end' and 'else' (not 'else if') should be allowed for commenting reasons
-
 const std = @import("std");
 const log = @import("log.zig");
 
