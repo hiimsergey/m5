@@ -117,7 +117,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// TODO TEST requirements for a line-by-line while loop
 	// - handles missing \n on last line
 	// - doesnt stop on blank lines
-	while (reader.streamDelimiter(&allocating.writer, '\n') catch 0 > 0) : ({
+	while (true) : ({
 		// TODO TEST
 		if (after_state == .has) {
 			after_state = .in;
@@ -137,6 +137,10 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 		linenr += 1;
 	}) {
 		const cmd = cmd: {
+			const written = reader.streamDelimiterLimit(&allocating.writer, '\n',
+				.unlimited) catch return error.System;
+			if (written == 0 and reader.seek == reader.end) break;
+
 			const line = allocating.written();
 			const line_trimmed = trimWStart(line);
 			if (!startsWith(line_trimmed, self.prefix.?)) {

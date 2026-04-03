@@ -158,7 +158,8 @@ fn realMain() error{Generic, System}!void {
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
-			ctx.output = cwd.openFile(output_path, .{ .mode = .write_only }) catch {
+			// TODO TEST does it append, overwrite or "over"write if ran multiple times?
+			ctx.output = cwd.createFile(output_path, .{}) catch {
 				// TODO switch |e|
 				log.err("Failed to open output '{s}'!", .{output_path});
 				return error.Generic;
