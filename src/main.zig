@@ -277,3 +277,5 @@ fn readDefinition(flag: []const u8) error{Generic}!struct { []const u8, MacroInt
 	try validateKey(key_cand);
 	return .{key_cand, value};
 }
+
+test { _ = @import("test.zig"); }

@@ -166,6 +166,8 @@ fn isNumber(buf: []const u8) bool {
 }
 
 // TODO FINAL CONSIDER replacing all this with controlled checks in the ConditionIterator
+// TODO FINAL CHECK if keeping this function, it should probably be private, since it's
+// ^ called in parse()
 /// Checks `expression` on syntactical validity.
 /// Logs on error.
 fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
