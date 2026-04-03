@@ -203,12 +203,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				}
 			},
 			.end => {
-				if (it.next() != null) {
-					log.errWithLineNr(
-						linenr,
-						"There can be nothing following 'end'!", .{});
-					return error.Generic;
-				}
+				// TODO FINAL COMMENT that users are free to type anything after 'end'
 
 				switch (state) {
 					.write, .dont_write => {
