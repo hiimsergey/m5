@@ -96,7 +96,6 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	var writer_wrapper = self.output.?.writer(&writer_buf);
 	const writer = &writer_wrapper.interface;
 
-	// TODO ERRHANDLE too long label in definition
 	// TODO ERRHANDLE too long prefix in definition
 	var _finding_label_buf: [64]u8 = undefined;
 	var finding_label: []const u8 = "";
@@ -118,7 +117,8 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// TODO TEST requirements for a line-by-line while loop
 	// - handles missing \n on last line
 	// - doesnt stop on blank lines
-	while (reader.streamDelimiterEnding(&allocating.writer, '\n') catch 0 > 0) : ({
+	while (reader.streamDelimiter(&allocating.writer, '\n') catch 0 > 0) : ({
+		// TODO TEST
 		if (after_state == .has) {
 			after_state = .in;
 
@@ -135,7 +135,6 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 		// Skips newline but not if file doesn't end with one.
 		reader.toss(@intFromBool(reader.seek < reader.end));
 		linenr += 1;
-		// TODO ADD after implementation
 	}) {
 		const cmd = cmd: {
 			const line = allocating.written();
@@ -265,6 +264,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						finding_label = "";
 					},
 					.find_label_after => {
+						// TODO CHECK
 						state = .write;
 						after_pos = Position{ .seek = reader.seek, .linenr = linenr };
 						reader.seek = last_jumped.seek;
@@ -287,7 +287,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				}
 				if (label.len > _finding_label_buf.len) {
 					log.errWithLineNr(linenr,
-						"Label must be at most {d} characters (bytes) lnog!",
+						"Label must be at most {d} characters (bytes) long!",
 						.{_finding_label_buf.len});
 					return error.Generic;
 				}
@@ -355,7 +355,6 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					break :key result;
 				};
 				const value = value: {
-					// TODO when implementing expression, you probably dont need trimming
 					const value_buf = trimWEnd(cmd[it.index..]);
 					break :value std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| {
 						switch (e) {
@@ -386,7 +385,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 
 					if (cand == null or subkeyword != null) {
 						log.errWithLineNr(linenr,
-							"'write' statement expects a single variable name!", .{});
+							"'write' statement expects single variable name!", .{});
 						return error.Generic;
 					}
 
@@ -481,8 +480,6 @@ fn trimWEnd(buf: []const u8) []const u8 {
 	return std.mem.trimEnd(u8, buf, " \t");
 }
 
-// TODO ERRHANDLE double label declaration
-// TODO ERRHANDLE no label but yes goto
 // TODO ERRHANDLE delete file if runtime error
 // TODO ERRHANDLE scope becomes -1
 // TODO dont call after in after body
