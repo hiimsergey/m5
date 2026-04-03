@@ -10,7 +10,7 @@ pub fn build(b: *Build) void {
 	const exe = b.addExecutable(.{
 		.name = "lt",
 		.root_module = b.createModule(.{
-			.root_source_file = b.path("src/main.zig"),
+			.root_source_file = b.path("main.zig"),
 			.target = target,
 			.optimize = optimize
 		})
