@@ -26,13 +26,6 @@ const help_text =
 	\\                       If value not given, default is 1
 	\\
 ;
-// TODO CONSIDER find /tmp location and open the same file (truncate ofc)
-const stdout_proxy_basename = ".m5-stdout-proxy.tmp";
-
-const stdout_file = File.stdout();
-var stdout_buf: [1024]u8 = undefined;
-var stdout_wrapper = stdout_file.writer(&stdout_buf);
-const stdout = &stdout_wrapper.interface;
 
 pub fn main() u8 {
 	defer log.stderr.flush() catch {};
@@ -111,8 +104,7 @@ fn realMain() error{User, System}!void {
 			};
 		}
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
-			stdout.print(help_text, .{}) catch {};
-			stdout.flush() catch {};
+			File.stdout().writeAll(help_text) catch {};
 			return;
 		}
 		// TODO PLAN implement
@@ -174,49 +166,11 @@ fn realMain() error{User, System}!void {
 		return error.User;
 	}
 
-	const use_stdout: bool = use_stdout: {
-		if (ctx.output != null) break :use_stdout false;
-
-		// TODO PLAN
-		ctx.output = cwd.createFile(stdout_proxy_basename,
-			.{ .read = true, .exclusive = true })
-		catch |e| switch (e) {
-			error.PathAlreadyExists => {
-				log.err(
-					\\m5 uses the temporary file '{s}' as a proxy for stdout
-					\\but it already exists!
-					\\If you need to write to stdout, please remove it!
-					, .{stdout_proxy_basename}
-				);
-				return error.User;
-			},
-			else => return error.System
-		};
-
-		break :use_stdout true;
-	};
+	// If no -o flag given, print to stdout.
+	if (ctx.output == null) ctx.output = File.stdout();
 
 	// This is where the fun begins!
-	const ret = ctx.run(gpa);
-
-	if (use_stdout) {
-		var reader_buf: [1024]u8 = undefined;
-		var reader_wrapper = ctx.output.?.reader(&reader_buf);
-
-		_ = reader_wrapper.interface.streamRemaining(stdout) catch return error.System;
-		stdout.flush() catch return error.System;
-
-		cwd.deleteFile(stdout_proxy_basename) catch {
-			log.err(
-				\\m5 uses the temporary file '{s}' as a proxy for stdout
-				\\but it failed to delete it afterwards! Sorry! :(
-				, .{stdout_proxy_basename}
-			);
-			return error.System;
-		};
-	}
-
-	return ret;
+	return ctx.run(gpa);
 }
 
 /// Logs on error.

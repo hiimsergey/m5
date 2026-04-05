@@ -47,7 +47,7 @@ const ConditionIterator = struct {
 				scope -= 1;
 				if (scope != 0) continue;
 
-				const result = self.expression[0..i];
+				const result = self.expression[1..i];
 				self.expression = self.expression[i + 1..];
 				return result;
 			},
@@ -66,6 +66,7 @@ const ParseState = enum(u8) {
 	expecting_operator
 };
 
+// TODO CONSIDER only logging here and introducing a custom error type for other parse functions
 // TODO CONSIDER MOVE validate out, so that the other functions dont use linenr
 pub fn parse(
 	expression: []const u8,
@@ -172,8 +173,9 @@ fn termValue(
 	const value: MacroInt = std.fmt.parseInt(MacroInt, literal, 10) catch |e| value: {
 		if (e == error.Overflow) {
 			log.errWithLineNr(linenr,
-				"Absolute value of '{s}' is too big to represent!",
-				.{literal});
+				\\Number {s} is not representable!"
+				\\Only numbers from {d} to {d} are supported!
+				, .{literal, std.math.minInt(MacroInt), std.math.maxInt(MacroInt)});
 			return error.User;
 		}
 
@@ -194,6 +196,52 @@ fn termValue(
 
 	if (!negate) return value;
 	return @intFromBool(value == 0);
+}
+
+fn parseDivide(expr: []const u8, linenr: usize, ctx: *const Context) error{User}!bool {
+	var it = ConditionIterator.init(expr, '/');
+
+	var result: MacroInt = result: {
+		const maybe = it.next() catch {
+			log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
+			return error.User;
+		};
+		break :result maybe.?;
+	};
+
+	while (it.next() catch {
+		log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
+		return error.User;
+	}) |slice| {
+		// TODO CONSIDER use endBracket somewhere
+		const parse_result = if (slice[0] == '(') try parse(slice[1..], linenr, ctx)
+			else try parseMult(slice, linenr, ctx);
+		result = @divFloor(result, parse_result);
+	}
+	return result;
+}
+
+fn parseMult(expr: []const u8, linenr: usize, ctx: *const Context) error{User}!bool {
+	var it = ConditionIterator.init(expr, '*');
+
+	var result: MacroInt = result: {
+		const maybe = it.next() catch {
+			log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
+			return error.User;
+		};
+		break :result maybe.?;
+	};
+
+	while (it.next() catch {
+		log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
+		return error.User;
+	}) |slice| {
+		// TODO CONSIDER use endBracket somewhere
+		const parse_result = if (slice[0] == '(') try parse(slice[1..], linenr, ctx)
+			else try parseMult(slice, linenr, ctx);
+		result = @divFloor(result, parse_result);
+	}
+	return result;
 }
 
 // TODO FINAL REMOVE
@@ -369,12 +417,13 @@ fn validateLiteral(buf: []const u8, linenr: usize) error{User}!void {
 /// Checks `buf` on whether it represents a an unsigned 32-bit integer.
 /// Logs on error.
 fn validateNumber(buf: []const u8, linenr: usize) error{User}!void {
-	_ = std.fmt.parseInt(u32, buf, 10) catch |e| {
+	_ = std.fmt.parseInt(MacroInt, buf, 10) catch |e| {
 		switch (e) {
 			// TODO add "only X to Y" comment
 			error.Overflow => log.errWithLineNr(linenr,
-				"Value of '{s}' is too big to represent!",
-				.{buf}),
+				\\Number {s} is not representable!"
+				\\Only numbers from {d} to {d} are supported!
+				, .{buf, std.math.minInt(MacroInt), std.math.maxInt(MacroInt)}),
 			error.InvalidCharacter => log.errWithLineNr(linenr,
 				"Value '{s}' is not a valid number!", .{buf})
 		}

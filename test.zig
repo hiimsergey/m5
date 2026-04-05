@@ -1,3 +1,4 @@
+// TODO ALL
 const std = @import("std");
 const parser = @import("parser.zig");
 
