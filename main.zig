@@ -38,7 +38,7 @@ pub fn main() u8 {
 	defer log.stderr.flush() catch {};
 
 	realMain() catch |e| switch (e) {
-		error.Generic => return 1,
+		error.User => return 1,
 		error.System => {
 			log.err("System failure!", .{});
 			return 71;
@@ -52,18 +52,18 @@ pub const validateKey = struct {
 	const banned_chars = "+-*/&|!<>() \t";
 
 	/// Returns an error and logs if `buf` can't be a valid key.
-	fn f(buf: []const u8) error{Generic}!void {
+	fn f(buf: []const u8) error{User}!void {
 		if (buf.len == 0) {
-			log.err("You can't define a macro with an empty name!", .{});
-			return error.Generic;
+			log.err("Key may not have empty name!", .{});
+			return error.User;
 		}
 		for (buf) |c| if (std.mem.containsAtLeastScalar(u8, banned_chars, 1, c)) {
 			log.err("Key '{s}' contains forbidden character '{c}'!", .{buf, c});
-			return error.Generic;
+			return error.User;
 		};
 		if (isNumber(buf)) {
 			log.err("Keys can't be numbers!", .{});
-			return error.Generic;
+			return error.User;
 		}
 	}
 
@@ -79,7 +79,7 @@ pub const validateKey = struct {
 // TODO TEST non-ascii define names, like cyrillic
 // TODO FINAL ALL TEST log.err* branches
 
-fn realMain() error{Generic, System}!void {
+fn realMain() error{User, System}!void {
 	var aw = AllocatorWrapper.init();
 	defer aw.deinit();
 	const gpa = aw.allocator(std.heap.smp_allocator);
@@ -102,12 +102,12 @@ fn realMain() error{Generic, System}!void {
 					"You can either take input from pipe or from positional " ++
 					"argument, not both!",
 					.{});
-				return error.Generic;
+				return error.User;
 			}
 			ctx.input = cwd.openFile(arg, .{ .mode = .read_only }) catch {
 				// TODO switch |e|
 				log.err("Failed to open input '{s}'!", .{arg});
-				return error.Generic;
+				return error.User;
 			};
 		}
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
@@ -136,7 +136,7 @@ fn realMain() error{Generic, System}!void {
 			ctx.output = cwd.createFile(output_path, .{}) catch {
 				// TODO switch |e|
 				log.err("Failed to open output '{s}'!", .{output_path});
-				return error.Generic;
+				return error.User;
 			};
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "p:")) {
@@ -145,7 +145,7 @@ fn realMain() error{Generic, System}!void {
 				log.err(
 					"Prefix must be at most {d} characters (bytes) long!",
 					.{ctx._prefix_buf.len});
-				return error.Generic;
+				return error.User;
 			}
 			@memcpy(ctx._prefix_buf[0..prefix.len], prefix);
 			ctx.prefix = ctx._prefix_buf[0..prefix.len];
@@ -156,7 +156,7 @@ fn realMain() error{Generic, System}!void {
 		}
 		else {
 			log.errWithHelp("Invalid flag '{s}'!", .{arg});
-			return error.Generic;
+			return error.User;
 		}
 	}
 
@@ -165,13 +165,13 @@ fn realMain() error{Generic, System}!void {
 			log.errWithHelp(
 				"Input must be given as a positional argument or through piping!",
 				.{});
-			return error.Generic;
+			return error.User;
 		}
 		ctx.input = stdin;
 	}
 	if (ctx.prefix == null) {
 		log.errWithHelp("Prefix must be given with the -p flag!", .{});
-		return error.Generic;
+		return error.User;
 	}
 
 	const use_stdout: bool = use_stdout: {
@@ -188,7 +188,7 @@ fn realMain() error{Generic, System}!void {
 					\\If you need to write to stdout, please remove it!
 					, .{stdout_proxy_basename}
 				);
-				return error.Generic;
+				return error.User;
 			},
 			else => return error.System
 		};
@@ -220,7 +220,7 @@ fn realMain() error{Generic, System}!void {
 }
 
 /// Logs on error.
-fn readDefinition(flag: []const u8) error{Generic}!struct { []const u8, MacroInt } {
+fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } {
 	// '=' is also banned, of course, but is guaranteed to not appear in
 	// the key string.
 	const definition = flag["-d:".len..];
@@ -238,11 +238,11 @@ fn readDefinition(flag: []const u8) error{Generic}!struct { []const u8, MacroInt
 					\\Only numbers from {d} to {d} are supported!
 					, .{value_buf, std.math.minInt(MacroInt), std.math.maxInt(MacroInt)}
 				);
-				return error.Generic;
+				return error.User;
 			},
 			error.InvalidCharacter => {
 				log.err("Value '{s}' is not a valid number!", .{value_buf});
-				return error.Generic;
+				return error.User;
 			}
 		};
 

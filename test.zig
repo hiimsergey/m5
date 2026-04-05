@@ -412,7 +412,7 @@ test "Condition validation" {
 	try validate("a < b < c", 1); // (0|1) < c
 	try validate("a != b", 1);
 
-	const E = error.Generic;
+	const E = error.User;
 	try expectError(E, validate("a |", 1));
 	try expectError(E, validate("a ! b", 1));
 	try expectError(E, validate("2bad", 1));

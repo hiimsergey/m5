@@ -12,12 +12,13 @@ const ConditionIterator = struct {
 		return .{ .expression = expression, .token = token };
 	}
 
-	pub fn next(self: *ConditionIterator) ?[]const u8 {
+	/// Does not log.
+	pub fn next(self: *ConditionIterator) error{User}!?[]const u8 {
 		if (self.expression.len == 0) return null;
 		// TODO REPLACE with Context.trimWStart
 		self.expression = std.mem.trimStart(u8, self.expression, " ");
 
-		if (self.expression[0] == '(') return self.endBracket();
+		if (self.expression[0] == '(') return try self.endBracket();
 
 		for (0..self.expression.len) |i| {
 			if (self.expression[i] == self.token) {
@@ -36,7 +37,9 @@ const ConditionIterator = struct {
 	/// Called when first character in buffer is opening parenthesis.
 	/// Returns slice ending with its corresponding closing parenthesis and advances
 	/// iterator.
-	fn endBracket(self: *ConditionIterator) []const u8 {
+	/// If there is no closing parenthesis, returns `error.User`.
+	/// Does not log.
+	fn endBracket(self: *ConditionIterator) error{User}![]const u8 {
 		var scope: usize = 1;
 		for (1..self.expression.len) |i| switch (self.expression[i]) {
 			'(' => scope += 1,
@@ -50,7 +53,7 @@ const ConditionIterator = struct {
 			},
 			else => continue
 		};
-		unreachable;
+		return error.User;
 	}
 };
 
@@ -68,32 +71,35 @@ pub fn parse(
 	expression: []const u8,
 	linenr: usize,
 	ctx: *const Context
-) error{Generic}!bool {
+) error{User}!bool {
 	try validate(expression, linenr);
-	return parseOr(expression, linenr, ctx);
-}
 
-fn parseOr(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 	var result = false;
 	
-	var it = ConditionIterator.init(condition, '|');
-	while (it.next()) |slice| {
+	var it = ConditionIterator.init(expression, '|');
+	while (it.next() catch {
+		log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
+		return error.User;
+	}) |slice| {
 		// TODO CONSIDER use endBracket somewhere
-		const parse_result = if (slice[0] == '(') parseOr(slice[1..], linenr, ctx)
-			else parseAnd(slice, linenr, ctx);
+		const parse_result = if (slice[0] == '(') try parse(slice[1..], linenr, ctx)
+			else try parseAnd(slice, linenr, ctx);
 		result = result or parse_result;
 	}
 	return result;
 }
 
-fn parseAnd(condition: []const u8, linenr: usize, ctx: *const Context) bool {
+fn parseAnd(condition: []const u8, linenr: usize, ctx: *const Context) error{User}!bool {
 	var result = true;
 	var it = ConditionIterator.init(condition, '&');
 
-	while (it.next()) |slice| {
+	while (it.next() catch {
+		log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
+		return error.User;
+	}) |slice| {
 		// TODO CONSIDER use endBracket somewhere
-		const parse_result = if (slice[0] == '(') parseOr(slice[1..], linenr, ctx)
-			else parseCmp(slice, linenr, ctx);
+		const parse_result = if (slice[0] == '(') try parse(slice[1..], linenr, ctx)
+			else try parseCmp(slice, linenr, ctx);
 		result = result and parse_result;
 	}
 	return result;
@@ -106,39 +112,39 @@ fn parseAnd(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 //     after handling
 //     math expressions
 // optimize bool expression and other algorithms
-fn parseCmp(condition: []const u8, linenr: usize, ctx: *const Context) bool {
+fn parseCmp(condition: []const u8, linenr: usize, ctx: *const Context) error{User}!bool {
 	for (0..condition.len) |i| {
 		switch (condition[i]) {
 			'>' => {
-				const lhs = termValue(condition[0..i], linenr, ctx);
+				const lhs = try termValue(condition[0..i], linenr, ctx);
 
 				if (condition[i + 1] == '=') {
-					const rhs = termValue(condition[i + 2..], linenr, ctx);
+					const rhs = try termValue(condition[i + 2..], linenr, ctx);
 					return lhs >= rhs;
 				}
-				const rhs = termValue(condition[i + 1..], linenr, ctx);
+				const rhs = try termValue(condition[i + 1..], linenr, ctx);
 				return lhs > rhs;
 			},
 			'<' => {
-				const lhs = termValue(condition[0..i], linenr, ctx);
+				const lhs = try termValue(condition[0..i], linenr, ctx);
 
 				if (condition[i + 1] == '=') {
-					const rhs = termValue(condition[i + 2..], linenr, ctx);
+					const rhs = try termValue(condition[i + 2..], linenr, ctx);
 					return lhs <= rhs;
 				}
-				const rhs = termValue(condition[i + 1..], linenr, ctx);
+				const rhs = try termValue(condition[i + 1..], linenr, ctx);
 				return lhs < rhs;
 			},
 			'=' => {
-				const lhs = termValue(condition[0..i], linenr, ctx);
-				const rhs = termValue(condition[i + 1..], linenr, ctx);
+				const lhs = try termValue(condition[0..i], linenr, ctx);
+				const rhs = try termValue(condition[i + 1..], linenr, ctx);
 				return lhs == rhs;
 			},
 			'!' => {
 				// foo != bar
 				if (condition[i + 1] == '=') {
-					const lhs = termValue(condition[0..i], linenr, ctx);
-					const rhs = termValue(condition[i + 2..], linenr, ctx);
+					const lhs = try termValue(condition[0..i], linenr, ctx);
+					const rhs = try termValue(condition[i + 2..], linenr, ctx);
 					return lhs != rhs;
 				}
 				// !foo
@@ -148,39 +154,41 @@ fn parseCmp(condition: []const u8, linenr: usize, ctx: *const Context) bool {
 		}
 	}
 
-	const value: MacroInt = termValue(condition, linenr, ctx);
+	const value: MacroInt = try termValue(condition, linenr, ctx);
 	return value > 0;
 }
 
+// TODO implement mathematical expressions
+/// Logs on error.
 fn termValue(
 	term: []const u8,
 	linenr: usize,
 	ctx: *const Context
-) error{Generic}!MacroInt {
+) error{User}!MacroInt {
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
-	const trimmed = std.mem.trim(u8, trim_nots, " \t");
+	const literal = std.mem.trim(u8, trim_nots, " \t");
 
-	const value: MacroInt = std.fmt.parseInt(MacroInt, trimmed, 10) catch |e| value: {
+	const value: MacroInt = std.fmt.parseInt(MacroInt, literal, 10) catch |e| value: {
 		if (e == error.Overflow) {
 			log.errWithLineNr(linenr,
 				"Absolute value of '{s}' is too big to represent!",
-				.{trimmed});
-			return error.Generic;
+				.{literal});
+			return error.User;
 		}
 
-		// TODO ERRHANDLE trimmed contains banned_chars
+		try validateLiteral(literal, linenr);
 
-		break :value ctx.macros.get(trimmed) orelse {
+		break :value ctx.macros.get(literal) orelse {
 			if (!ctx.flags.safe) break :value 0;
 
+			// TODO TEST correct flushing
 			log.errWithLineNr(linenr,
 				"Macro '{s}' is undefined! (error shown because of --safe)",
-				.{trimmed}
+				.{literal}
 			);
-			log.stderr.flush() catch {};
 			// TODO CHECK that this leads to proper shutdown
-			return error.Generic;
+			return error.User;
 		};
 	};
 
@@ -189,7 +197,7 @@ fn termValue(
 }
 
 // TODO FINAL REMOVE
-fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
+fn validate(expression: []const u8, linenr: usize) error{User}!void {
 	var scope: usize = 0;
 	var state = ParseState.expecting_expression;
 	var cur_num_literal: []const u8 = "";
@@ -211,19 +219,19 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 			.expecting_expression => scope += 1,
 			else => {
 				log.errWithLineNr(linenr, "Expected expression, got '('!", .{});
-				return error.Generic;
+				return error.User;
 			}
 		},
 		')' => {
 			//if (scope == 0 or (state != .in_expression and state != .in_number)) {
 			if (scope == 0) {
 				log.errWithLineNr(linenr, "Unexpected ')' without opening bracket!", .{});
-				return error.Generic;
+				return error.User;
 			}
 			switch (state) {
 				.expecting_expression => {
 					log.errWithLineNr(linenr, "Expected expression, got ')'!", .{});
-					return error.Generic;
+					return error.User;
 				},
 				.in_number => {
 					try validateNumber(cur_num_literal, linenr);
@@ -243,7 +251,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 			.expecting_expression => state = .in_number,
 			else => {
 				log.errWithLineNr(linenr, "Invalid character '-'!", .{});
-				return error.Generic;
+				return error.User;
 			}
 		},
 		'0'...'9' => switch (state) {
@@ -255,7 +263,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 			},
 			.expecting_operator => {
 				log.errWithLineNr(linenr, "Expected operator, got number!", .{});
-				return error.Generic;
+				return error.User;
 			}
 		},
 		'_' => switch (state) {
@@ -264,7 +272,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 			.expecting_expression => state = .in_expression,
 			.expecting_operator => {
 				log.errWithLineNr(linenr, "Expected operator, got '_'!", .{});
-				return error.Generic;
+				return error.User;
 			}
 			// TODO ADD test leading and trailing underscore in numbers
 		},
@@ -273,7 +281,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 				log.errWithLineNr(linenr,
 					"Expected expression, got operator '{c}'!",
 					.{expression[i]});
-				return error.Generic;
+				return error.User;
 			},
 			else => state = .expecting_expression
 		},
@@ -283,7 +291,7 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 					log.errWithLineNr(linenr,
 						"Expected expression, got comparison operator '{c}'!",
 						.{expression[i]});
-					return error.Generic;
+					return error.User;
 				},
 				else => state = .expecting_expression
 			}
@@ -294,14 +302,14 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 			.expecting_operator => {
 				if (i < expression.len - 1 and expression[i + 1] != '=') {
 					log.errWithLineNr(linenr, "Expected operator, got '!'!", .{});
-					return error.Generic;
+					return error.User;
 				}
 				i += 1;
 				state = .expecting_expression;
 			},
 			else => {
 				log.errWithLineNr(linenr, "Unexpected '!' in number!", .{});
-				return error.Generic;
+				return error.User;
 			},
 		},
 		else => switch (state) {
@@ -310,33 +318,57 @@ fn validate(expression: []const u8, linenr: usize) error{Generic}!void {
 				log.errWithLineNr(linenr,
 					"Unexpected character '{c}' in number!",
 					.{expression[i]});
-				return error.Generic;
+				return error.User;
 			},
 			.expecting_expression => state = .in_expression,
 			.expecting_operator => {
 				log.errWithLineNr(linenr,
 					"Expected operator, got '{s}'!",
 					.{expression[i..]});
-				return error.Generic;
+				return error.User;
 			}
 		},
 	};
 
 	if (scope > 0) {
 		log.errWithLineNr(linenr, "Unclosed parenthesis!", .{});
-		return error.Generic;
+		return error.User;
 	}
 	// TODO if .in_number, then check overflow again
 	if (state == .expecting_expression) {
 		log.errWithLineNr(linenr, "Expected expression at the end!", .{});
-		return error.Generic;
+		return error.User;
 	}
+}
+
+/// Returns an error and logs if iterator item contains syntax error.
+/// Logs on error.
+fn validateLiteral(buf: []const u8, linenr: usize) error{User}!void {
+	if (buf.len == 0) {
+		log.err("Expected expression!", .{});
+		return error.User;
+	}
+	for (buf) |c| switch (c) {
+		' ' => {
+			log.errWithLineNr(linenr, "Syntax error!", .{});
+			return error.User;
+		},
+		'(' => {
+			log.errWithLineNr(linenr, "Expected operator, got '('!", .{});
+			return error.User;
+		},
+		')' => {
+			log.errWithLineNr(linenr, "Expected expression, got ')'!", .{});
+			return error.User;
+		},
+		else => continue
+	};
 }
 
 // TODO REMOVE
 /// Checks `buf` on whether it represents a an unsigned 32-bit integer.
 /// Logs on error.
-fn validateNumber(buf: []const u8, linenr: usize) error{Generic}!void {
+fn validateNumber(buf: []const u8, linenr: usize) error{User}!void {
 	_ = std.fmt.parseInt(u32, buf, 10) catch |e| {
 		switch (e) {
 			// TODO add "only X to Y" comment
@@ -346,7 +378,7 @@ fn validateNumber(buf: []const u8, linenr: usize) error{Generic}!void {
 			error.InvalidCharacter => log.errWithLineNr(linenr,
 				"Value '{s}' is not a valid number!", .{buf})
 		}
-		return error.Generic;
+		return error.User;
 	};
 }
 
@@ -368,3 +400,4 @@ fn validateNumber(buf: []const u8, linenr: usize) error{Generic}!void {
 //   "Expected operator, got '{s}'!",
 //   "Unclosed parenthesis!", .{});
 //   "Expected expression at the end!", .{});
+// TODO FINAL CHECK is AND weaker than OR?

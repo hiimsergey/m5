@@ -81,7 +81,7 @@ pub fn deinit(self: *Self) void {
 	self.macros.deinit();
 }
 
-pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
+pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 	// TODO CHECK if you've handled all errors
 	// handled by m5's validate* functions
 
@@ -155,11 +155,11 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 		const keyword: []const u8 = it.next() orelse {
 			log.errWithLineNr(
 				linenr, "Expected keyword, found end of line!", .{});
-			return error.Generic;
+			return error.User;
 		};
 		const keyword_arm: Keyword = keyword_map.get(keyword) orelse {
 			log.errWithLineNr(linenr, "Invalid keyword '{s}'!", .{keyword});
-			return error.Generic;
+			return error.User;
 		};
 
 		switch (keyword_arm) {
@@ -171,7 +171,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
 								"'if' clause expects expression!", .{});
-							return error.Generic;
+							return error.User;
 						}
 
 						if (try parser.parse(expression, linenr, self)) continue;
@@ -194,14 +194,14 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							log.errWithLineNr(linenr,
 								"'else' expects nothing or 'if', got '{s}'!",
 								.{subkeyword});
-							return error.Generic;
+							return error.User;
 						}
 
 						const expression = trimWEnd(cmd[it.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
 								"'else if' clause expects expression!", .{});
-							return error.Generic;
+							return error.User;
 						}
 
 						if (try parser.parse(expression, linenr, self))
@@ -221,7 +221,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							log.errWithLineNr(
 								linenr,
 								"There can be no 'end' without prior 'if' clause!", .{});
-							return error.Generic;
+							return error.User;
 						}
 					},
 					.ignore => {
@@ -237,20 +237,20 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (scope > 0) {
 					log.errWithLineNr(linenr,
 						"You can't declare labels inside of 'if' clauses!", .{});
-					return error.Generic;
+					return error.User;
 				}
 
 				const label = trimWEnd(cmd[it.index..]);
 				if (label.len == 0) {
 					log.errWithLineNr(linenr,
 						"label declaration expects label name!", .{});
-					return error.Generic;
+					return error.User;
 				}
 				if (label.len > _finding_label_buf.len) {
 					log.errWithLineNr(linenr,
 						"Label must be at most {d} characters (bytes) long!",
 						.{_finding_label_buf.len});
-					return error.Generic;
+					return error.User;
 				}
 
 				if (redefinition: {
@@ -263,7 +263,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				}) {
 					log.errWithLineNr(linenr,
 						"You can't declare the same label twice!", .{});
-					return error.Generic;
+					return error.User;
 				}
 
 				if (std.mem.eql(u8, finding_label, label)) switch (state) {
@@ -293,13 +293,13 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 				if (label.len == 0) {
 					log.errWithLineNr(linenr, "'goto' statement expects label name!",
 						.{});
-					return error.Generic;
+					return error.User;
 				}
 				if (label.len > _finding_label_buf.len) {
 					log.errWithLineNr(linenr,
 						"Label must be at most {d} characters (bytes) long!",
 						.{_finding_label_buf.len});
-					return error.Generic;
+					return error.User;
 				}
 
 				const pos = self.labels.get(label) orelse {
@@ -327,7 +327,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					log.errWithLineNr(linenr,
 						"Label must be at most {d} characters (bytes) lnog!",
 						.{_finding_label_buf.len});
-					return error.Generic;
+					return error.User;
 				}
 
 				after_pos = self.labels.get(label) orelse {
@@ -359,7 +359,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					const result = it.next() orelse {
 						log.errWithLineNr(linenr,
 							"'define' statement needs variable name and value!", .{});
-						return error.Generic;
+						return error.User;
 					};
 					// TODO TEST invalid key in 'define'
 					try validateKey(result);
@@ -379,7 +379,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 							error.InvalidCharacter => log.errWithLineNr(linenr,
 								"Value '{s}' is not a valid number!", .{value_buf})
 						}
-						return error.Generic;
+						return error.User;
 					};
 				};
 
@@ -397,7 +397,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					if (cand == null or subkeyword != null) {
 						log.errWithLineNr(linenr,
 							"'write' statement expects single variable name!", .{});
-						return error.Generic;
+						return error.User;
 					}
 
 					break :key cand.?;
@@ -412,7 +412,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					// TODO once we've implemented checking parse* functions, we can return
 					// an error instead!
 					log.stderr.flush() catch {};
-					return error.Generic;
+					return error.User;
 				};
 
 				writer.print("{d}", .{value}) catch return error.System;
@@ -428,7 +428,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 					if (it.next() != null) {
 						log.errWithLineNr(linenr,
 							"'back' statement only takes one argument!", .{});
-						return error.Generic;
+						return error.User;
 					}
 
 					break :n std.fmt.parseInt(u64, buf, 10) catch |e| switch (e) {
@@ -439,17 +439,18 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 								\\Only numbers from {d} to {d} are supported!
 								, .{buf, std.math.minInt(u64), std.math.maxInt(u64)}
 							);
-							return error.Generic;
+							return error.User;
 						},
 						error.InvalidCharacter => {
 							log.errWithLineNr(linenr,
 								"Value '{s}' is not a valid number!", .{buf});
-							return error.Generic;
+							return error.User;
 						}
 					};
 				};
 
 				writer.flush() catch return error.System;
+				// TODO CONSIDER using logical pos
 				writer_wrapper.seekTo(writer_wrapper.pos - n) catch return error.System;
 			}
 		}
@@ -461,11 +462,11 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 			log.err(
 				"'if' clause expects scope termination with corresponding 'end' keyword!",
 				.{});
-			return error.Generic;
+			return error.User;
 		},
 		.find_label_goto, .find_label_after => {
 			log.err("No such label '{s}'!", .{finding_label});
-			return error.Generic;
+			return error.User;
 		},
 	}
 
@@ -484,6 +485,7 @@ pub fn run(self: *Self, gpa: Allocator) error{Generic, System}!void {
 	// if verbose, print "Processed <input>..."
 
 	writer.flush() catch return error.System;
+	// TODO CONSIDER using logical pos
 	self.output.?.setEndPos(writer_wrapper.pos) catch return error.System;
 }
 
