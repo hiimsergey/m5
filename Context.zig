@@ -33,9 +33,11 @@ const Keyword = enum(u8) {@"if", @"else", end};
 const WriteState = enum(u8) {
 	/// Just pass next line to output
 	write,
-	/// Don't write next line until end of scope or truthy else clause
+	/// Don't write next line until end of scope or truthy else clause.
+	/// Set after entering falsy case.
 	dont_write,
 	/// Don't write next line until end of scope
+	/// Set after entering else-clause of truthy case.
 	ignore
 };
 
@@ -149,8 +151,7 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 							return error.User;
 						}
 
-						if (try parser.parse(expression, linenr, self))
-							state = .write
+						if (try parser.parse(expression, linenr, self)) state = .write
 						else state = .dont_write;
 					},
 					.ignore => {}
@@ -159,21 +160,15 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 			.end => {
 				// TODO FINAL COMMENT that users are free to type anything after 'end'
 
-				switch (state) {
-					.write, .dont_write => {
-						state = .write;
-						if (scope == 0) {
-							log.errWithLineNr(
-								linenr,
-								"There can be no 'end' without prior 'if' clause!", .{});
-							return error.User;
-						}
-					},
-					.ignore => {
-						if (ignored_scopes == 0) state = .write
-						else ignored_scopes -= 1;
-					}
+				// TODO NOW NOW TEST nested ifs
+				if (scope == 0) {
+					log.errWithLineNr(
+						linenr,
+						"There can be no 'end' without prior 'if' clause!", .{});
+					return error.User;
 				}
+				if (ignored_scopes == 0) state = .write
+				else ignored_scopes -= 1;
 				scope -= 1;
 			}
 		}

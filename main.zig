@@ -9,7 +9,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple text file processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.2.0   GPL-3.0 license
+	\\v0.2.1   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -90,13 +90,6 @@ fn realMain() error{User, System}!void {
 
 	while (args.next()) |arg| {
 		if (arg[0] != '-') {
-			if (input_from_pipe) {
-				log.errWithHelp(
-					"You can either take input from pipe or from positional " ++
-					"argument, not both!",
-					.{});
-				return error.User;
-			}
 			ctx.input = cwd.openFile(arg, .{ .mode = .read_only }) catch {
 				// TODO switch |e|
 				log.err("Failed to open input '{s}'!", .{arg});
