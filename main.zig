@@ -42,7 +42,7 @@ pub fn main() u8 {
 
 // TODO CONSIDER MOVE
 pub const validateKey = struct {
-	const banned_chars = "+-*/&|!<>() \t";
+	const banned_chars = "=+-*/&|!<>() \t";
 
 	/// Returns an error and logs if `buf` can't be a valid key.
 	fn f(buf: []const u8) error{User}!void {
@@ -200,4 +200,7 @@ fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } 
 	return .{key_cand, value};
 }
 
-test { _ = @import("test.zig"); }
+test {
+	_ = @import("parser.zig");
+	_ = @import("test.zig");
+}

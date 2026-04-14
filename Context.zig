@@ -123,7 +123,9 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 							return error.User;
 						}
 
-						if (try parser.parse(expression, linenr, self)) continue;
+						const parse_result = parser.parse(expression, linenr, self) catch
+							return error.User;
+						if (parse_result) continue;
 						state = .dont_write;
 					},
 					.dont_write, .ignore => ignored_scopes += 1
@@ -151,8 +153,9 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 							return error.User;
 						}
 
-						if (try parser.parse(expression, linenr, self)) state = .write
-						else state = .dont_write;
+						const parse_result = parser.parse(expression, linenr, self) catch
+							return error.User;
+						state = if (parse_result) .write else .dont_write;
 					},
 					.ignore => {}
 				}
