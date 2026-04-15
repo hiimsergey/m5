@@ -9,7 +9,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple text file processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.2.1   GPL-3.0 license
+	\\v0.3.0   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\

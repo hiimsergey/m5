@@ -92,7 +92,6 @@ const ParseState = enum(u8) {
 
 /// Logs on error.
 pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bool {
-	std.debug.print("parsing '{s}'\n", .{expr});
 	return parseOr(expr, ctx) catch |e| {
 		switch (e) {
 			ParseError.DoubleEquals =>
@@ -143,40 +142,33 @@ test parse {
 }
 
 fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
-	std.debug.print("\nparseOr\n", .{});
 	var result = false;
 
 	var it = ParseIterator.init(expr, "|");
 	while (try it.next()) |tuple| {
 		const slice: []const u8 = tuple.@"0";
-		std.debug.print("+'{s}'\n", .{slice});
 		const parse_result = if (slice[0] == '(') try parseOr(slice[1..], ctx)
 			else try parseAnd(slice, ctx);
 		result = result or parse_result;
 	}
-	std.debug.print("\n~parseOr\n", .{});
 	return result;
 }
 
 fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
-	std.debug.print("\nparseAnd\n", .{});
 	var result = true;
 
 	var it = ParseIterator.init(expr, "&");
 	while (try it.next()) |tuple| {
 		const slice: []const u8 = tuple.@"0";
-		std.debug.print("+'{s}'\n", .{slice});
 		const parse_result = if (slice[0] == '(') try parseOr(slice[1..], ctx)
 			else try parseCmp(slice, ctx);
 		result = result and parse_result;
 	}
-	std.debug.print("\n~parseAnd\n", .{});
 	return result;
 }
 
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
-	std.debug.print("\nparseCmp\n", .{});
 	const nextAdjusted = struct {
 		fn f(it: *ParseIterator)
 		error{
@@ -220,7 +212,6 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var it = ParseIterator.init(expr, "<>=");
 
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
-	std.debug.print("+'{s}'\n", .{lhs_buf});
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
 			const lhs: bool = try parseOr(expr[1..], ctx);
@@ -252,7 +243,6 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 		lhs = rhs;
 	}
 
-	std.debug.print("\n~parseCmp\n", .{});
 	return true;
 }
 

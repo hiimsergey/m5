@@ -191,9 +191,7 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 	// if verbose, print "Processed <input>..."
 
 	writer.flush() catch return error.System;
-	// TODO CONSIDER? using writer_wrapper.pos
-	const writer_logical_pos = writer_wrapper.pos + writer_wrapper.interface.buffer.len;
-	self.output.?.setEndPos(writer_logical_pos) catch return error.System;
+	self.output.?.setEndPos(writer_wrapper.pos) catch return error.System;
 }
 
 /// Wrapper around std.mem.startsWith.
