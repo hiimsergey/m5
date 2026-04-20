@@ -10,7 +10,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple text file processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.2   GPL-3.0 license
+	\\v0.3.3   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -41,7 +41,6 @@ pub fn main() u8 {
 	return 0;
 }
 
-// TODO CONSIDER MOVE
 pub const validateKey = struct {
 	const banned_chars = "=+-*/&|!<>() \t";
 
@@ -161,7 +160,7 @@ fn realMain() error{User, System}!void {
 	}
 
 	// If no -o flag given, print to stdout.
-	if (ctx.output == null) ctx.output = File.stdout();
+	ctx.output = ctx.output orelse File.stdout();
 
 	// This is where the fun begins!
 	return ctx.run(gpa);
@@ -169,8 +168,6 @@ fn realMain() error{User, System}!void {
 
 /// Logs on error.
 fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } {
-	// '=' is also banned, of course, but is guaranteed to not appear in
-	// the key string.
 	const definition = flag["-d:".len..];
 
 	const key_cand: []const u8, const value: MacroInt = kv: {
@@ -179,19 +176,17 @@ fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } 
 
 		const key_cand = definition[0..eq_index];
 		const value_buf: []const u8 = a.trimWEnd(definition[eq_index + 1..]);
-		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| switch (e) {
-			error.Overflow => {
-				log.err(
+		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| {
+			switch (e) {
+				error.Overflow => log.err(
 					\\Number {s} is not representable!"
 					\\Only numbers from {d} to {d} are supported!
 					, .{value_buf, std.math.minInt(MacroInt), std.math.maxInt(MacroInt)}
-				);
-				return error.User;
-			},
-			error.InvalidCharacter => {
-				log.err("Value '{s}' is not a valid number!", .{value_buf});
-				return error.User;
+				),
+				error.InvalidCharacter => log.err("Value '{s}' is not a valid number!",
+					.{value_buf})
 			}
+			return error.User;
 		};
 
 		break :kv .{key_cand, value};
