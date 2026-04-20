@@ -8,23 +8,23 @@ const File = std.fs.File;
 const MacroInt = Context.MacroInt;
 
 const help_text =
-	\\m5 - a simple text file processor
+	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
 	\\v0.3.3   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
 	\\Options:
-	\\  --help               Print this message
-	\\  --verbose            Log information while interpreting
-	\\  --safe               Exit with error on encountering undefined variable
+	\\  --help               print this message
+	\\  --verbose            log information while interpreting
+	\\  --safe               exit with error on encountering undefined variable
 	\\
-	\\  -o:<file>            Write result into file
-	\\                       If not given, write to stdout
-	\\  -p:<text>            Set string marking beginning of m5 directive lines
-	\\                       Must be given
-	\\  -d:<key>[=<number>]  Define variable with value
-	\\                       If value not given, default is 1
+	\\  -o:<file>            write result into file
+	\\                         if not given, write to stdout
+	\\  -p:<text>            set string marking beginning of m5 directive lines
+	\\                         must be given
+	\\  -d:<key>[=<number>]  define variable with value
+	\\                         if value not given, default is 1
 	\\
 ;
 
