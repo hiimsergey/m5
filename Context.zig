@@ -1,4 +1,5 @@
 const std = @import("std");
+const a = @import("alias.zig");
 const log = @import("log.zig");
 const parser = @import("parser.zig");
 
@@ -91,8 +92,8 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 			if (written == 0 and reader.seek == reader.end) break;
 
 			const line = allocating.written();
-			const line_trimmed = trimWStart(line);
-			if (!startsWith(line_trimmed, self.prefix.?)) {
+			const line_trimmed = a.trimWStart(line);
+			if (!a.startsWith(line_trimmed, self.prefix.?)) {
 				if (state == .write)
 					writer.print("{s}\n", .{line}) catch return error.System;
 				continue;
@@ -116,14 +117,16 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 				scope += 1;
 				switch (state) {
 					.write => {
-						const expression = trimWEnd(cmd[it.index..]);
+						const expression = a.trimWEnd(cmd[it.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
 								"'if' clause expects expression!", .{});
 							return error.User;
 						}
 
-						if (try parser.parse(expression, linenr, self)) continue;
+						const parse_result = parser.parse(expression, linenr, self) catch
+							return error.User;
+						if (parse_result) continue;
 						state = .dont_write;
 					},
 					.dont_write, .ignore => ignored_scopes += 1
@@ -144,15 +147,16 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 							return error.User;
 						}
 
-						const expression = trimWEnd(cmd[it.index..]);
+						const expression = a.trimWEnd(cmd[it.index..]);
 						if (expression.len == 0) {
 							log.errWithLineNr(linenr,
 								"'else if' clause expects expression!", .{});
 							return error.User;
 						}
 
-						if (try parser.parse(expression, linenr, self)) state = .write
-						else state = .dont_write;
+						const parse_result = parser.parse(expression, linenr, self) catch
+							return error.User;
+						state = if (parse_result) .write else .dont_write;
 					},
 					.ignore => {}
 				}
@@ -188,24 +192,6 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 	// if verbose, print "Processed <input>..."
 
 	writer.flush() catch return error.System;
-	// TODO CONSIDER? using writer_wrapper.pos
-	const writer_logical_pos = writer_wrapper.pos + writer_wrapper.interface.buffer.len;
-	self.output.?.setEndPos(writer_logical_pos) catch return error.System;
-}
-
-/// Wrapper around std.mem.startsWith.
-fn startsWith(haystack: []const u8, needle: []const u8) bool {
-	return std.mem.startsWith(u8, haystack, needle);
-}
-
-/// Wrapper around std.mem.trimStart
-fn trimWStart(buf: []const u8) []const u8 {
-	return std.mem.trimStart(u8, buf, " \t");
-}
-
-/// Wrapper around std.mem.trimEnd
-fn trimWEnd(buf: []const u8) []const u8 {
-	return std.mem.trimEnd(u8, buf, " \t");
 }
 
 // TODO ERRHANDLE delete file if runtime error
