@@ -9,6 +9,7 @@ const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
 const gpa = std.testing.allocator;
 
+// TODO FINAL remove unused/redundant
 const ParseError = error{
 	DoubleEquals,
 	EmptyLiteral,
@@ -17,6 +18,7 @@ const ParseError = error{
 	UnexpectedBang,
 	UnexpectedBangOperator,
 	UnexpectedLparen,
+	UnexpectedOperator,
 	UnexpectedRparen,
 	UnexpectedSpace,
 	UnrepresentableNumber
@@ -41,9 +43,8 @@ const ParseIterator = struct {
 
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
-			if (self.expr[0] == '(') {
-				_ = try self.endBracket();
-				i = 0;
+			if (self.expr[i] == '(') {
+				_ = try self.closeParen(&i);
 				continue;
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
@@ -53,7 +54,7 @@ const ParseIterator = struct {
 		}
 
 		// In the case that we're returning the whole remaining string, we will not need
-		// the token, therefore we use 0 as a "Don't-care".
+		// the token, therefore we use 0 as a dontcare.
 		defer self.expr = "";
 		return .{self.expr, 0};
 	}
@@ -62,18 +63,16 @@ const ParseIterator = struct {
 	/// Called when first character in buffer is opening parenthesis.
 	/// Returns slice ending with its corresponding closing parenthesis and advances
 	/// iterator.
-	/// If there is no closing parenthesis, returns `error.User`.
+	/// If there is no closing parenthesis, returns `error.UnclosedParenthesis`.
 	/// Does not log.
-	fn endBracket(self: *ParseIterator) error{UnclosedParenthesis}![]const u8 {
+	fn closeParen(self: *ParseIterator, i: *usize) error{UnclosedParenthesis}!void {
+		i.* += 1;
 		var scope: usize = 1;
-		for (1..self.expr.len) |i| switch (self.expr[i]) {
+		while (i.* < self.expr.len) : (i.* += 1) switch (self.expr[i.*]) {
 			'(' => scope += 1,
 			')' => {
 				scope -= 1;
-				if (scope != 0) continue;
-
-				defer self.expr = self.expr[i + 1..];
-				return self.expr[0..i + 1];
+				if (scope == 0) return;
 			},
 			else => continue
 		};
@@ -110,6 +109,8 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 				log.errWithLineNr(linenr, "Unexpected operator after '!'", .{}),
 			ParseError.UnexpectedLparen =>
 				log.errWithLineNr(linenr, "Expected operator, found '('!", .{}),
+			ParseError.UnexpectedOperator =>
+				log.errWithLineNr(linenr, "Expected expression, found operator!", .{}),
 			ParseError.UnexpectedRparen =>
 				log.errWithLineNr(linenr, "Expected expression, found ')'!", .{}),
 			ParseError.UnexpectedSpace =>
@@ -172,9 +173,13 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const nextAdjusted = struct {
 		fn f(it: *ParseIterator)
 		error{
-			DoubleEquals, UnclosedParenthesis, UnexpectedBangOperator
+			DoubleEquals,
+			UnclosedParenthesis,
+			UnexpectedBangOperator,
+			UnexpectedOperator
 		}!struct{[]const u8, ?CompareOperator} {
 			var buf: []const u8, const char: u8 = (try it.next()).?;
+			if (buf.len == 0) return ParseError.UnexpectedOperator;
 			if (char == 0) return .{buf, null};
 
 			if (buf[buf.len - 1] == '!') switch (char) {
@@ -339,6 +344,38 @@ error{EmptyLiteral, UnexpectedSpace, UnexpectedLparen, UnexpectedRparen}!void {
 		else => continue
 	};
 }
+
+// TODO TEST
+// a & b
+// a & a
+// a | b
+// a | a
+// (a)
+// a        >          b
+
+// TODO TEST invalid
+// a &
+// a |
+// a <
+// & a
+// | a
+// < a
+// == a
+// a =
+// a = b
+// a !
+// a != b
+// a ! b
+// ! a
+// (a
+// a)
+// a (b)
+// a (b
+// a) b
+// a + b
+// a +- b
+// a &| b
+// a & & b
 
 // TODO ADD test for \t characters
 // TODO ADD test for too much whitespace
