@@ -1,4 +1,5 @@
 const std = @import("std");
+const a = @import("alias.zig");
 const log = @import("log.zig");
 
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
@@ -9,7 +10,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple text file processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.1   GPL-3.0 license
+	\\v0.3.2   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -177,7 +178,7 @@ fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } 
 			break :kv .{definition, 1};
 
 		const key_cand = definition[0..eq_index];
-		const value_buf: []const u8 = definition[eq_index + 1..];
+		const value_buf: []const u8 = a.trimWEnd(definition[eq_index + 1..]);
 		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| switch (e) {
 			error.Overflow => {
 				log.err(
