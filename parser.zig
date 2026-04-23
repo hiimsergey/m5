@@ -10,19 +10,24 @@ const expectError = std.testing.expectError;
 const gpa = std.testing.allocator;
 
 // TODO FINAL remove unused/redundant
-const ParseError = error{
+const NextAdjustedError = error {
 	DoubleEquals,
-	EmptyLiteral,
 	UnclosedParenthesis,
-	UndefinedMacro,
-	UnexpectedBang,
+	UnexpectedBang, // TODO FINAL CONSIDER REMOVE
 	UnexpectedBangOperator,
-	UnexpectedLparen,
-	UnexpectedOperator,
-	UnexpectedRparen,
-	UnexpectedSpace,
-	UnrepresentableNumber
+	UnexpectedOperator
 };
+const ValidateLiteralError = error{
+	EmptyLiteral,
+	UnexpectedSpace,
+	UnexpectedLparen,
+	UnexpectedRparen
+};
+const TermValueError = error {
+	UndefinedMacro,
+	UnrepresentableNumber
+} || ValidateLiteralError;
+const ParseError = NextAdjustedError || TermValueError;
 
 const ParseIterator = struct {
 	expr: []const u8,
@@ -76,7 +81,7 @@ const ParseIterator = struct {
 			},
 			else => continue
 		};
-		return ParseError.UnclosedParenthesis;
+		return error.UnclosedParenthesis;
 	}
 };
 
@@ -143,34 +148,28 @@ test parse {
 }
 
 fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
-	std.debug.print("\nparseOr\n", .{});
 	var result = false;
 
 	var it = ParseIterator.init(expr, "|");
 	while (try it.next()) |tuple| {
 		const slice: []const u8 = tuple.@"0";
-		std.debug.print("+'{s}'\n", .{slice});
 		const parse_result = if (slice[0] == '(') try parseOr(slice[1..], ctx)
 			else try parseAnd(slice, ctx);
 		result = result or parse_result;
 	}
-	std.debug.print("\n~parseOr\n", .{});
 	return result;
 }
 
 fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
-	std.debug.print("\nparseAnd\n", .{});
 	var result = true;
 
 	var it = ParseIterator.init(expr, "&");
 	while (try it.next()) |tuple| {
 		const slice: []const u8 = tuple.@"0";
-		std.debug.print("+'{s}'\n", .{slice});
 		const parse_result = if (slice[0] == '(') try parseOr(slice[1..], ctx)
 			else try parseCmp(slice, ctx);
 		result = result and parse_result;
 	}
-	std.debug.print("\n~parseAnd\n", .{});
 	return result;
 }
 
@@ -178,18 +177,13 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const nextAdjusted = struct {
 		fn f(it: *ParseIterator)
-		error{
-			DoubleEquals,
-			UnclosedParenthesis,
-			UnexpectedBangOperator,
-			UnexpectedOperator
-		}!struct{[]const u8, ?CompareOperator} {
+		NextAdjustedError!struct{[]const u8, ?CompareOperator} {
 			var buf: []const u8, const char: u8 = (try it.next()).?;
-			if (buf.len == 0) return ParseError.UnexpectedOperator;
+			if (buf.len == 0) return NextAdjustedError.UnexpectedOperator;
 			if (char == 0) return .{buf, null};
 
 			if (buf[buf.len - 1] == '!') switch (char) {
-				'<', '>' => return ParseError.UnexpectedBangOperator,
+				'<', '>' => return NextAdjustedError.UnexpectedBangOperator,
 				'=' => {
 					buf = buf[0..buf.len - 1];
 					return .{buf, .neq};
@@ -212,7 +206,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 					return .{buf, .gt};
 				},
 				'=' => {
-					if (it.expr[0] == '=') return ParseError.DoubleEquals;
+					if (it.expr[0] == '=') return NextAdjustedError.DoubleEquals;
 					return .{buf, .eq};
 				},
 				else => unreachable
@@ -254,7 +248,6 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 		lhs = rhs;
 	}
 
-	std.debug.print("\n~parseCmp\n", .{});
 	return true;
 }
 
@@ -309,14 +302,7 @@ fn parseCmp0(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 // TODO implement mathematical expressions
 /// Logs on error.
-fn termValue(term: []const u8, ctx: *const Context) error{
-	EmptyLiteral,
-	UndefinedMacro,
-	UnexpectedLparen,
-	UnexpectedRparen,
-	UnexpectedSpace,
-	UnrepresentableNumber
-}!MacroInt {
+fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 	// TODO NOW CONSIDER check for illegal characters
 	// there's a reason not to, cause maybe validateKey used to do the job at the
 	// start
@@ -326,12 +312,12 @@ fn termValue(term: []const u8, ctx: *const Context) error{
 	const literal = std.mem.trim(u8, trim_nots, " \t");
 
 	const value: MacroInt = std.fmt.parseInt(MacroInt, literal, 10) catch |e| value: {
-		if (e == error.Overflow) return ParseError.UnrepresentableNumber;
+		if (e == error.Overflow) return TermValueError.UnrepresentableNumber;
 		try validateLiteral(literal);
 
 		break :value ctx.macros.get(literal) orelse {
 			if (!ctx.safe) break :value 0;
-			return error.UndefinedMacro;
+			return TermValueError.UndefinedMacro;
 		};
 	};
 
@@ -341,13 +327,12 @@ fn termValue(term: []const u8, ctx: *const Context) error{
 
 /// Returns an error and logs if iterator item contains syntax error.
 /// Logs on error.
-fn validateLiteral(buf: []const u8)
-error{EmptyLiteral, UnexpectedSpace, UnexpectedLparen, UnexpectedRparen}!void {
-	if (buf.len == 0) return ParseError.EmptyLiteral;
+fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
+	if (buf.len == 0) return ValidateLiteralError.EmptyLiteral;
 	for (buf) |c| switch (c) {
-		' ' => return ParseError.UnexpectedSpace,
-		'(' => return ParseError.UnexpectedLparen,
-		')' => return ParseError.UnexpectedRparen,
+		' ' => return ValidateLiteralError.UnexpectedSpace,
+		'(' => return ValidateLiteralError.UnexpectedLparen,
+		')' => return ValidateLiteralError.UnexpectedRparen,
 		else => continue
 	};
 }

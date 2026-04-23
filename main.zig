@@ -2,10 +2,10 @@ const std = @import("std");
 const a = @import("alias.zig");
 const log = @import("log.zig");
 
-const  OpenError = std.fs.File.OpenError;
-const AllocatorWrapper = @import("AllocatorWrapper.zig");
+const Init = std.process.Init;
+const OpenError = std.Io.File.OpenError;
 const Context = @import("Context.zig");
-const File = std.fs.File;
+const File = std.Io.File;
 const MacroInt = Context.MacroInt;
 
 const help_text =
@@ -28,10 +28,11 @@ const help_text =
 	\\
 ;
 
-pub fn main() u8 {
+pub fn main(init: Init) u8 {
+	log.init(init.io);
 	defer log.stderr.flush() catch {};
 
-	realMain() catch |e| switch (e) {
+	realMain(init) catch |e| switch (e) {
 		error.User => return 1,
 		error.System => {
 			log.err("System failure!", .{});
@@ -72,25 +73,28 @@ pub const validateKey = struct {
 // TODO TEST non-ascii define names, like cyrillic
 // TODO FINAL ALL TEST log.err* (branch coverage)
 
-fn realMain() error{User, System}!void {
-	var aw = AllocatorWrapper.init();
-	defer aw.deinit();
-	const gpa = aw.allocator(std.heap.smp_allocator);
+fn realMain(init: Init) error{User, System}!void {
+	const gpa = init.gpa;
+	const io = init.io;
 
-	var args = std.process.argsWithAllocator(gpa) catch return error.System;
+	var args = init.minimal.args.iterateAllocator(gpa) catch
+		return error.System;
 	defer args.deinit();
 	_ = args.skip(); // Skips executable name
 
 	var ctx = Context.init(gpa);
-	defer ctx.deinit();
+	defer ctx.deinit(io);
 
 	const stdin = File.stdin();
-	const input_from_pipe: bool = !stdin.isTty();
-	const cwd = std.fs.cwd();
+	const input_from_pipe: bool = input_from_pipe: {
+		const isatty: bool = stdin.isTty(io) catch return error.System;
+		break :input_from_pipe !isatty;
+	};
+	const cwd = std.Io.Dir.cwd();
 
 	while (args.next()) |arg| {
 		if (arg[0] != '-') {
-			ctx.input = cwd.openFile(arg, .{ .mode = .read_only }) catch |e| {
+			ctx.input = cwd.openFile(io, arg, .{ .mode = .read_only }) catch |e| {
 				switch (e) {
 					OpenError.FileNotFound =>
 						log.err("Input '{s}' does not exist!", .{arg}),
@@ -104,7 +108,7 @@ fn realMain() error{User, System}!void {
 			};
 		}
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
-			File.stdout().writeAll(help_text) catch {};
+			File.stdout().writeStreamingAll(io, help_text) catch {};
 			return;
 		}
 		// TODO PLAN implement
@@ -116,7 +120,7 @@ fn realMain() error{User, System}!void {
 		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
 			// TODO TEST does it append, overwrite or "over"write if ran multiple times?
-			ctx.output = cwd.createFile(output_path, .{}) catch {
+			ctx.output = cwd.createFile(io, output_path, .{}) catch {
 				// TODO switch |e|
 				log.err("Failed to open output '{s}'!", .{output_path});
 				return error.User;
@@ -161,7 +165,7 @@ fn realMain() error{User, System}!void {
 	ctx.output = ctx.output orelse File.stdout();
 
 	// This is where the fun begins!
-	return ctx.run(gpa);
+	return ctx.run(gpa, io);
 }
 
 /// Logs on error.

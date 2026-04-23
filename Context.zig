@@ -4,7 +4,8 @@ const log = @import("log.zig");
 const parser = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;
-const File = std.fs.File;
+const File = Io.File;
+const Io = std.Io;
 /// Process-specific metadata
 const Self = @This();
 
@@ -48,22 +49,21 @@ pub fn init(gpa: Allocator) Self {
 	return .{ .macros = MacroMap.init(gpa) };
 }
 
-pub fn deinit(self: *Self) void {
-	if (self.output) |file| file.close();
-	if (self.input) |file| file.close();
+pub fn deinit(self: *Self, io: Io) void {
+	if (self.output) |file| file.close(io);
+	if (self.input) |file| file.close(io);
 	self.macros.deinit();
 }
 
-pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
+pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 	// TODO CHECK if you've handled all errors
 	// handled by m5's validate* functions
-
 	var reader_buf: [1024]u8 = undefined;
-	var reader_wrapper = self.input.?.reader(&reader_buf);
+	var reader_wrapper = self.input.?.reader(io, &reader_buf);
 	const reader = &reader_wrapper.interface;
 
 	var writer_buf: [1024]u8 = undefined;
-	var writer_wrapper = self.output.?.writer(&writer_buf);
+	var writer_wrapper = self.output.?.writer(io, &writer_buf);
 	const writer = &writer_wrapper.interface;
 
 	var allocating = std.Io.Writer.Allocating.init(gpa);
