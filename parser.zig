@@ -107,10 +107,12 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 			ParseError.UndefinedMacro =>
 				log.errWithLineNr(linenr,
 					"Undefined macro found! (You see this error because of --safe)", .{}),
+			ParseError.UnexpectedBang =>
+				log.errWithLineNr(linenr, "Unexpected '!' Perhaps you meant '!='?", .{}),
 			ParseError.UnexpectedBangOperator =>
 				log.errWithLineNr(linenr, "Unexpected operator after '!'", .{}),
-			ParseError.UnexpectedExpression =>
-				log.errWithLineNr(linenr, "Expected operator, found expression!", .{}),
+			ParseError.UnexpectedLparen =>
+				log.errWithLineNr(linenr, "Expected operator, found '('!", .{}),
 			ParseError.UnexpectedOperator =>
 				log.errWithLineNr(linenr, "Expected expression, found operator!", .{}),
 			ParseError.UnexpectedRparen =>
