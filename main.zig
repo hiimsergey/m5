@@ -156,7 +156,7 @@ fn realMain(init: Init) error{User, System}!void {
 	return ctx.run(gpa, io);
 }
 
-/// Does proper logging on failed file opening/creation.
+/// Does proper lgoging on failed file opening.
 fn logOpenError(e: OpenError, arg: []const u8) void {
 	switch (e) {
 		OpenError.FileNotFound =>
@@ -170,7 +170,7 @@ fn logOpenError(e: OpenError, arg: []const u8) void {
 }
 
 /// Logs on error.
-fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } {
+fn readDefinition(flag: []const u8) error{User}!struct {[]const u8, MacroInt} {
 	const definition = flag["-d:".len..];
 
 	const key_cand: []const u8, const value: MacroInt = kv: {
