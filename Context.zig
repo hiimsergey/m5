@@ -21,9 +21,6 @@ macros: MacroMap,
 pub const MacroInt = isize;
 pub const MacroMap = std.StringHashMap(MacroInt);
 
-// TODO CONSIDER
-const Position = struct { seek: usize, linenr: usize };
-
 const Keyword = enum(u8) {@"if", @"else", end};
 
 const WriteState = enum(u8) {
@@ -39,7 +36,7 @@ const WriteState = enum(u8) {
 
 const keyword_map = std.StaticStringMap(Keyword).initComptime(kvs: {
 	const fields = @typeInfo(Keyword).@"enum".fields;
-	var result: [fields.len]struct{ []const u8, Keyword } = undefined;
+	var result: [fields.len]struct { []const u8, Keyword } = undefined;
 	for (fields, 0..) |field, i|
 		result[i] = .{ field.name, @as(Keyword, @enumFromInt(field.value)) };
 	break :kvs result;

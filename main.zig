@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.4   GPL-3.0 license
+	\\v0.3.6   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -77,8 +77,7 @@ fn realMain(init: Init) error{User, System}!void {
 	const gpa = init.gpa;
 	const io = init.io;
 
-	var args = init.minimal.args.iterateAllocator(gpa) catch
-		return error.System;
+	var args = init.minimal.args.iterateAllocator(gpa) catch return error.System;
 	defer args.deinit();
 	_ = args.skip(); // Skips executable name
 
@@ -95,15 +94,7 @@ fn realMain(init: Init) error{User, System}!void {
 	while (args.next()) |arg| {
 		if (arg[0] != '-') {
 			ctx.input = cwd.openFile(io, arg, .{ .mode = .read_only }) catch |e| {
-				switch (e) {
-					OpenError.FileNotFound =>
-						log.err("Input '{s}' does not exist!", .{arg}),
-					OpenError.AccessDenied =>
-						log.err("Permission denied to open input '{s}'!", .{arg}),
-					OpenError.IsDir =>
-						log.err("Input '{s}' is not a file but a dir!", .{arg}),
-					else => log.err("Failed to open input '{s}'!", .{arg})
-				}
+				logOpenError(e, arg);
 				return error.User;
 			};
 		}
@@ -111,7 +102,6 @@ fn realMain(init: Init) error{User, System}!void {
 			File.stdout().writeStreamingAll(io, help_text) catch {};
 			return;
 		}
-		// TODO PLAN implement
 		// when encountering undefined variable, exit with error
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			// Shoutout to @MrMineDe for forcing me to implement this feature.
@@ -119,10 +109,8 @@ fn realMain(init: Init) error{User, System}!void {
 		}
 		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
-			// TODO TEST does it append, overwrite or "over"write if ran multiple times?
-			ctx.output = cwd.createFile(io, output_path, .{}) catch {
-				// TODO switch |e|
-				log.err("Failed to open output '{s}'!", .{output_path});
+			ctx.output = cwd.createFile(io, output_path, .{}) catch |e| {
+				logOpenError(e, arg);
 				return error.User;
 			};
 		}
@@ -168,8 +156,21 @@ fn realMain(init: Init) error{User, System}!void {
 	return ctx.run(gpa, io);
 }
 
+/// Does proper lgoging on failed file opening.
+fn logOpenError(e: OpenError, arg: []const u8) void {
+	switch (e) {
+		OpenError.FileNotFound =>
+			log.err("Input '{s}' does not exist!", .{arg}),
+		OpenError.AccessDenied =>
+			log.err("Permission denied to open input '{s}'!", .{arg}),
+		OpenError.IsDir =>
+			log.err("Input '{s}' is not a file but a dir!", .{arg}),
+		else => log.err("Failed to open input '{s}'!", .{arg})
+	}
+}
+
 /// Logs on error.
-fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } {
+fn readDefinition(flag: []const u8) error{User}!struct {[]const u8, MacroInt} {
 	const definition = flag["-d:".len..];
 
 	const key_cand: []const u8, const value: MacroInt = kv: {

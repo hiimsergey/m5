@@ -1,4 +1,5 @@
 const std = @import("std");
+const a = @import("alias.zig");
 const log = @import("log.zig");
 
 const CompareOperator = std.math.CompareOperator;
@@ -9,21 +10,18 @@ const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
 const gpa = std.testing.allocator;
 
-// TODO FINAL remove unused/redundant
-const NextAdjustedError = error {
+const NextAdjustedError = error{
 	DoubleEquals,
 	UnclosedParenthesis,
-	UnexpectedBang, // TODO FINAL CONSIDER REMOVE
 	UnexpectedBangOperator,
 	UnexpectedOperator
 };
 const ValidateLiteralError = error{
 	EmptyLiteral,
-	UnexpectedSpace,
-	UnexpectedLparen,
+	UnexpectedExpression,
 	UnexpectedRparen
 };
-const TermValueError = error {
+const TermValueError = error{
 	UndefinedMacro,
 	UnrepresentableNumber
 } || ValidateLiteralError;
@@ -40,11 +38,12 @@ const ParseIterator = struct {
 	/// If not null, returns next item in the iterator, respecting parentheses and matched
 	/// token.
 	/// Returns null if `self.condition` was iterated through completely.
+	/// Returns error.UnclosedParenthesis if expression contains unclosed opening
+	/// parenthesis.
 	/// Does not log.
-	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?struct{[]const u8, u8} {
+	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?struct {[]const u8, u8} {
 		if (self.expr.len == 0) return null;
-		// TODO ALL REPLACE with Context.trimWStart
-		self.expr = std.mem.trimStart(u8, self.expr, " \t");
+		self.expr = a.trimWStart(self.expr);
 
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
@@ -108,18 +107,14 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 			ParseError.UndefinedMacro =>
 				log.errWithLineNr(linenr,
 					"Undefined macro found! (You see this error because of --safe)", .{}),
-			ParseError.UnexpectedBang =>
-				log.errWithLineNr(linenr, "Unexpected '!' Perhaps you meant '!='?", .{}),
 			ParseError.UnexpectedBangOperator =>
 				log.errWithLineNr(linenr, "Unexpected operator after '!'", .{}),
-			ParseError.UnexpectedLparen =>
-				log.errWithLineNr(linenr, "Expected operator, found '('!", .{}),
+			ParseError.UnexpectedExpression =>
+				log.errWithLineNr(linenr, "Expected operator, found expression!", .{}),
 			ParseError.UnexpectedOperator =>
 				log.errWithLineNr(linenr, "Expected expression, found operator!", .{}),
 			ParseError.UnexpectedRparen =>
 				log.errWithLineNr(linenr, "Expected expression, found ')'!", .{}),
-			ParseError.UnexpectedSpace =>
-				log.errWithLineNr(linenr, "Invalid spacing!", .{}),
 			ParseError.UnrepresentableNumber =>
 				log.errWithLineNr(linenr,
 					\\Unrepresentable number found!
@@ -177,7 +172,7 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const nextAdjusted = struct {
 		fn f(it: *ParseIterator)
-		NextAdjustedError!struct{[]const u8, ?CompareOperator} {
+		NextAdjustedError!struct {[]const u8, ?CompareOperator} {
 			var buf: []const u8, const char: u8 = (try it.next()).?;
 			if (buf.len == 0) return NextAdjustedError.UnexpectedOperator;
 			if (char == 0) return .{buf, null};
@@ -251,55 +246,6 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	return true;
 }
 
-// TODO REMOVE
-// remove these compiler errors
-// optimize bool expression and other algorithms
-fn parseCmp0(expr: []const u8, ctx: *const Context) ParseError!bool {
-	for (0..expr.len) |i| {
-		switch (expr[i]) {
-			'>' => {
-				const lhs = try termValue(expr[0..i], ctx);
-
-				if (expr[i + 1] == '=') {
-					const rhs = try termValue(expr[i + 2..], ctx);
-					return lhs >= rhs;
-				}
-				const rhs = try termValue(expr[i + 1..], ctx);
-				return lhs > rhs;
-			},
-			'<' => {
-				const lhs = try termValue(expr[0..i], ctx);
-
-				if (expr[i + 1] == '=') {
-					const rhs = try termValue(expr[i + 2..], ctx);
-					return lhs <= rhs;
-				}
-				const rhs = try termValue(expr[i + 1..], ctx);
-				return lhs < rhs;
-			},
-			'=' => {
-				const lhs = try termValue(expr[0..i], ctx);
-				const rhs = try termValue(expr[i + 1..], ctx);
-				return lhs == rhs;
-			},
-			'!' => {
-				// foo != bar
-				if (expr[i + 1] == '=') {
-					const lhs = try termValue(expr[0..i], ctx);
-					const rhs = try termValue(expr[i + 2..], ctx);
-					return lhs != rhs;
-				}
-				// !foo
-				break;
-			},
-			else => continue
-		}
-	}
-
-	const value: MacroInt = try termValue(expr, ctx);
-	return value != 0;
-}
-
 // TODO implement mathematical expressions
 /// Logs on error.
 fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
@@ -330,8 +276,7 @@ fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 	if (buf.len == 0) return ValidateLiteralError.EmptyLiteral;
 	for (buf) |c| switch (c) {
-		' ' => return ValidateLiteralError.UnexpectedSpace,
-		'(' => return ValidateLiteralError.UnexpectedLparen,
+		' ', '(' => return ValidateLiteralError.UnexpectedExpression,
 		')' => return ValidateLiteralError.UnexpectedRparen,
 		else => continue
 	};
