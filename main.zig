@@ -2,16 +2,16 @@ const std = @import("std");
 const a = @import("alias.zig");
 const log = @import("log.zig");
 
-const Init = std.process.Init;
-const OpenError = std.Io.File.OpenError;
+const  OpenError = std.fs.File.OpenError;
+const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Context = @import("Context.zig");
-const File = std.Io.File;
+const File = std.fs.File;
 const MacroInt = Context.MacroInt;
 
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.6   GPL-3.0 license
+	\\v0.3.4   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -28,11 +28,10 @@ const help_text =
 	\\
 ;
 
-pub fn main(init: Init) u8 {
-	log.init(init.io);
+pub fn main() u8 {
 	defer log.stderr.flush() catch {};
 
-	realMain(init) catch |e| switch (e) {
+	realMain() catch |e| switch (e) {
 		error.User => return 1,
 		error.System => {
 			log.err("System failure!", .{});
@@ -73,48 +72,57 @@ pub const validateKey = struct {
 // TODO TEST non-ascii define names, like cyrillic
 // TODO FINAL ALL TEST log.err* (branch coverage)
 
-fn realMain(init: Init) error{User, System}!void {
-	const gpa = init.gpa;
-	const io = init.io;
+fn realMain() error{User, System}!void {
+	var aw = AllocatorWrapper.init();
+	defer aw.deinit();
+	const gpa = aw.allocator(std.heap.smp_allocator);
 
-	var args = init.minimal.args.iterateAllocator(gpa) catch return error.System;
+	var args = std.process.argsWithAllocator(gpa) catch return error.System;
 	defer args.deinit();
 	_ = args.skip(); // Skips executable name
 
 	var ctx = Context.init(gpa);
-	defer ctx.deinit(io);
+	defer ctx.deinit();
 
 	const stdin = File.stdin();
-	const input_from_pipe: bool = input_from_pipe: {
-		const isatty: bool = stdin.isTty(io) catch return error.System;
-		break :input_from_pipe !isatty;
-	};
-	const cwd = std.Io.Dir.cwd();
+	const input_from_pipe: bool = !stdin.isTty();
+	const cwd = std.fs.cwd();
 
 	while (args.next()) |arg| {
 		if (arg[0] != '-') {
-			ctx.input = cwd.openFile(io, arg, .{ .mode = .read_only }) catch |e| {
-				logOpenError(e, arg);
+			ctx.input = cwd.openFile(arg, .{ .mode = .read_only }) catch |e| {
+				switch (e) {
+					OpenError.FileNotFound =>
+						log.err("Input '{s}' does not exist!", .{arg}),
+					OpenError.AccessDenied =>
+						log.err("Permission denied to open input '{s}'!", .{arg}),
+					OpenError.IsDir =>
+						log.err("Input '{s}' is not a file but a dir!", .{arg}),
+					else => log.err("Failed to open input '{s}'!", .{arg})
+				}
 				return error.User;
 			};
 		}
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
-			File.stdout().writeStreamingAll(io, help_text) catch {};
+			File.stdout().writeAll(help_text) catch {};
 			return;
 		}
-		// When encountering undefined variable, exit with error
+		// TODO PLAN implement
+		// when encountering undefined variable, exit with error
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			// Shoutout to @MrMineDe for forcing me to implement this feature.
 			ctx.safe = true;
 		}
-		else if (a.startsWith(arg[1..], "o:")) {
+		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
-			ctx.output = cwd.createFile(io, output_path, .{}) catch |e| {
-				logOpenError(e, arg);
+			// TODO TEST does it append, overwrite or "over"write if ran multiple times?
+			ctx.output = cwd.createFile(output_path, .{}) catch {
+				// TODO switch |e|
+				log.err("Failed to open output '{s}'!", .{output_path});
 				return error.User;
 			};
 		}
-		else if (a.startsWith(arg[1..], "p:")) {
+		else if (std.mem.startsWith(u8, arg[1..], "p:")) {
 			const prefix = arg["-p:".len..];
 			if (prefix.len > ctx._prefix_buf.len) {
 				log.err(
@@ -125,7 +133,7 @@ fn realMain(init: Init) error{User, System}!void {
 			@memcpy(ctx._prefix_buf[0..prefix.len], prefix);
 			ctx.prefix = ctx._prefix_buf[0..prefix.len];
 		}
-		else if (a.startsWith(arg[1..], "d:")) {
+		else if (std.mem.startsWith(u8, arg[1..], "d:")) {
 			const key: []const u8, const value: MacroInt = try readDefinition(arg);
 			ctx.macros.put(key, value) catch return error.System;
 		}
@@ -153,20 +161,7 @@ fn realMain(init: Init) error{User, System}!void {
 	ctx.output = ctx.output orelse File.stdout();
 
 	// This is where the fun begins!
-	return ctx.run(gpa, io);
-}
-
-/// Does proper logging on failed file opening/creation.
-fn logOpenError(e: OpenError, arg: []const u8) void {
-	switch (e) {
-		OpenError.FileNotFound =>
-			log.err("Input '{s}' does not exist!", .{arg}),
-		OpenError.AccessDenied =>
-			log.err("Permission denied to open input '{s}'!", .{arg}),
-		OpenError.IsDir =>
-			log.err("Input '{s}' is not a file but a dir!", .{arg}),
-		else => log.err("Failed to open input '{s}'!", .{arg})
-	}
+	return ctx.run(gpa);
 }
 
 /// Logs on error.
