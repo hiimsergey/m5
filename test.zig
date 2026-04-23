@@ -13,8 +13,8 @@ const gpa = std.testing.allocator;
 
 const m5 = "zig-out/bin/m5";
 const test_file_path = ".zig-cache/test.txt";
-var test_file: std.fs.File = undefined;
-var test_file_writer: std.fs.File.Writer = undefined;
+var test_file: std.Io.File = undefined;
+var test_file_writer: std.Io.File.Writer = undefined;
 var test_file_writer_buf: [1024]u8 = undefined;
 
 //fn validate(condition: []const u8) !void {

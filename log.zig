@@ -1,11 +1,17 @@
 const std = @import("std");
 
+const Io = std.Io;
+
 const error_tag = "\x1b[31;1merror:\x1b[0m ";
 
+pub var stderr: *Io.Writer = undefined;
 var stderr_buf: [128]u8 = undefined;
-var stderr_wrapper = std.fs.File.stderr().writer(&stderr_buf);
+var stderr_wrapper: Io.File.Writer = undefined;
 
-pub const stderr = &stderr_wrapper.interface;
+pub fn init(io: Io) void {
+	stderr_wrapper = Io.File.stderr().writer(io, &stderr_buf);
+	stderr = &stderr_wrapper.interface;
+}
 
 pub fn err(comptime fmt: []const u8, args: anytype) void {
 	stderr.print(error_tag, .{}) catch {};

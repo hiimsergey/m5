@@ -10,19 +10,22 @@ const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
 const gpa = std.testing.allocator;
 
-// TODO FINAL remove unused/redundant
-const ParseError = error{
+const NextAdjustedError = error{
 	DoubleEquals,
-	EmptyLiteral,
 	UnclosedParenthesis,
-	UndefinedMacro,
-	UnexpectedBang,
 	UnexpectedBangOperator,
-	UnexpectedExpression,
-	UnexpectedOperator,
-	UnexpectedRparen,
-	UnrepresentableNumber
+	UnexpectedOperator
 };
+const ValidateLiteralError = error{
+	EmptyLiteral,
+	UnexpectedExpression,
+	UnexpectedRparen
+};
+const TermValueError = error{
+	UndefinedMacro,
+	UnrepresentableNumber
+} || ValidateLiteralError;
+const ParseError = NextAdjustedError || TermValueError;
 
 const ParseIterator = struct {
 	expr: []const u8,
@@ -35,10 +38,10 @@ const ParseIterator = struct {
 	/// If not null, returns next item in the iterator, respecting parentheses and matched
 	/// token.
 	/// Returns null if `self.condition` was iterated through completely.
-	/// Returns error.UnclosedParenthesis if expression contains unclosed opening
+	/// Returns `error.UnclosedParenthesis` if expression contains unclosed opening
 	/// parenthesis.
 	/// Does not log.
-	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?struct{[]const u8, u8} {
+	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?struct {[]const u8, u8} {
 		if (self.expr.len == 0) return null;
 		self.expr = a.trimWStart(self.expr);
 
@@ -64,7 +67,7 @@ const ParseIterator = struct {
 	/// Called when first character in buffer is opening parenthesis.
 	/// Returns slice ending with its corresponding closing parenthesis and advances
 	/// iterator.
-	/// If there is no closing parenthesis, returns `ParseError.UnclosedParenthesis`.
+	/// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
 	/// Does not log.
 	fn closeParen(self: *ParseIterator, i: *usize) error{UnclosedParenthesis}!void {
 		i.* += 1;
@@ -77,7 +80,7 @@ const ParseIterator = struct {
 			},
 			else => continue
 		};
-		return ParseError.UnclosedParenthesis;
+		return error.UnclosedParenthesis;
 	}
 };
 
@@ -104,8 +107,6 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 			ParseError.UndefinedMacro =>
 				log.errWithLineNr(linenr,
 					"Undefined macro found! (You see this error because of --safe)", .{}),
-			ParseError.UnexpectedBang =>
-				log.errWithLineNr(linenr, "Unexpected '!' Perhaps you meant '!='?", .{}),
 			ParseError.UnexpectedBangOperator =>
 				log.errWithLineNr(linenr, "Unexpected operator after '!'", .{}),
 			ParseError.UnexpectedExpression =>
@@ -171,18 +172,13 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const nextAdjusted = struct {
 		fn f(it: *ParseIterator)
-		error{
-			DoubleEquals,
-			UnclosedParenthesis,
-			UnexpectedBangOperator,
-			UnexpectedOperator
-		}!struct{[]const u8, ?CompareOperator} {
+		NextAdjustedError!struct {[]const u8, ?CompareOperator} {
 			var buf: []const u8, const char: u8 = (try it.next()).?;
-			if (buf.len == 0) return ParseError.UnexpectedOperator;
+			if (buf.len == 0) return NextAdjustedError.UnexpectedOperator;
 			if (char == 0) return .{buf, null};
 
 			if (buf[buf.len - 1] == '!') switch (char) {
-				'<', '>' => return ParseError.UnexpectedBangOperator,
+				'<', '>' => return NextAdjustedError.UnexpectedBangOperator,
 				'=' => {
 					buf = buf[0..buf.len - 1];
 					return .{buf, .neq};
@@ -205,7 +201,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 					return .{buf, .gt};
 				},
 				'=' => {
-					if (it.expr[0] == '=') return ParseError.DoubleEquals;
+					if (it.expr[0] == '=') return NextAdjustedError.DoubleEquals;
 					return .{buf, .eq};
 				},
 				else => unreachable
@@ -251,13 +247,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 }
 
 /// Logs on error.
-fn termValue(term: []const u8, ctx: *const Context) error{
-	EmptyLiteral,
-	UndefinedMacro,
-	UnexpectedExpression,
-	UnexpectedRparen,
-	UnrepresentableNumber
-}!MacroInt {
+fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 	// TODO NOW CONSIDER check for illegal characters
 	// there's a reason not to, cause maybe validateKey used to do the job at the
 	// start
@@ -267,12 +257,12 @@ fn termValue(term: []const u8, ctx: *const Context) error{
 	const literal = std.mem.trim(u8, trim_nots, " \t");
 
 	const value: MacroInt = std.fmt.parseInt(MacroInt, literal, 10) catch |e| value: {
-		if (e == error.Overflow) return ParseError.UnrepresentableNumber;
+		if (e == error.Overflow) return TermValueError.UnrepresentableNumber;
 		try validateLiteral(literal);
 
 		break :value ctx.macros.get(literal) orelse {
 			if (!ctx.safe) break :value 0;
-			return error.UndefinedMacro;
+			return TermValueError.UndefinedMacro;
 		};
 	};
 
@@ -282,13 +272,11 @@ fn termValue(term: []const u8, ctx: *const Context) error{
 
 /// Returns an error and logs if iterator item contains syntax error.
 /// Logs on error.
-fn validateLiteral(buf: []const u8)
-error{EmptyLiteral, UnexpectedExpression, UnexpectedRparen}!void {
-	// TODO CHECK this branch
-	if (buf.len == 0) return ParseError.EmptyLiteral;
+fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
+	if (buf.len == 0) return ValidateLiteralError.EmptyLiteral;
 	for (buf) |c| switch (c) {
-		' ', '(' => return ParseError.UnexpectedExpression,
-		')' => return ParseError.UnexpectedRparen,
+		' ', '(' => return ValidateLiteralError.UnexpectedExpression,
+		')' => return ValidateLiteralError.UnexpectedRparen,
 		else => continue
 	};
 }
