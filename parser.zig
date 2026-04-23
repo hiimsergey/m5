@@ -5,6 +5,25 @@ const CompareOperator = std.math.CompareOperator;
 const Context = @import("Context.zig");
 const MacroInt = Context.MacroInt;
 
+const expectEqual = std.testing.expectEqual;
+const expectError = std.testing.expectError;
+const gpa = std.testing.allocator;
+
+// TODO FINAL remove unused/redundant
+const ParseError = error{
+	DoubleEquals,
+	EmptyLiteral,
+	UnclosedParenthesis,
+	UndefinedMacro,
+	UnexpectedBang,
+	UnexpectedBangOperator,
+	UnexpectedLparen,
+	UnexpectedOperator,
+	UnexpectedRparen,
+	UnexpectedSpace,
+	UnrepresentableNumber
+};
+
 const ParseIterator = struct {
 	expr: []const u8,
 	tokens: []const u8,
@@ -24,9 +43,8 @@ const ParseIterator = struct {
 
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
-			if (self.expr[0] == '(') {
-				_ = try self.endBracket();
-				i = 0;
+			if (self.expr[i] == '(') {
+				_ = try self.closeParen(&i);
 				continue;
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
@@ -36,7 +54,7 @@ const ParseIterator = struct {
 		}
 
 		// In the case that we're returning the whole remaining string, we will not need
-		// the token, therefore we use 0 as a "Don't-care".
+		// the token, therefore we use 0 as a dontcare.
 		defer self.expr = "";
 		return .{self.expr, 0};
 	}
@@ -45,18 +63,16 @@ const ParseIterator = struct {
 	/// Called when first character in buffer is opening parenthesis.
 	/// Returns slice ending with its corresponding closing parenthesis and advances
 	/// iterator.
-	/// If there is no closing parenthesis, returns `error.User`.
+	/// If there is no closing parenthesis, returns `error.UnclosedParenthesis`.
 	/// Does not log.
-	fn endBracket(self: *ParseIterator) error{UnclosedParenthesis}![]const u8 {
+	fn closeParen(self: *ParseIterator, i: *usize) error{UnclosedParenthesis}!void {
+		i.* += 1;
 		var scope: usize = 1;
-		for (1..self.expr.len) |i| switch (self.expr[i]) {
+		while (i.* < self.expr.len) : (i.* += 1) switch (self.expr[i.*]) {
 			'(' => scope += 1,
 			')' => {
 				scope -= 1;
-				if (scope != 0) continue;
-
-				defer self.expr = self.expr[i + 1..];
-				return self.expr[0..i + 1];
+				if (scope == 0) return;
 			},
 			else => continue
 		};
@@ -73,23 +89,8 @@ const ParseState = enum(u8) {
 	expecting_operator
 };
 
-// TODO CONSIDER MOVE
-const ParseError = error{
-	DoubleEquals,
-	EmptyLiteral,
-	UnclosedParenthesis,
-	UndefinedMacro,
-	UnexpectedBang,
-	UnexpectedBangOperator,
-	UnexpectedLparen,
-	UnexpectedRparen,
-	UnexpectedSpace,
-	UnrepresentableNumber
-};
-
 /// Logs on error.
-pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) error{User}!bool {
-	std.debug.print("parsing '{s}'\n", .{expr});
+pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bool {
 	return parseOr(expr, ctx) catch |e| {
 		switch (e) {
 			ParseError.DoubleEquals =>
@@ -104,8 +105,12 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) error{User}!b
 					"Undefined macro found! (You see this error because of --safe)", .{}),
 			ParseError.UnexpectedBang =>
 				log.errWithLineNr(linenr, "Unexpected '!' Perhaps you meant '!='?", .{}),
+			ParseError.UnexpectedBangOperator =>
+				log.errWithLineNr(linenr, "Unexpected operator after '!'", .{}),
 			ParseError.UnexpectedLparen =>
 				log.errWithLineNr(linenr, "Expected operator, found '('!", .{}),
+			ParseError.UnexpectedOperator =>
+				log.errWithLineNr(linenr, "Expected expression, found operator!", .{}),
 			ParseError.UnexpectedRparen =>
 				log.errWithLineNr(linenr, "Expected expression, found ')'!", .{}),
 			ParseError.UnexpectedSpace =>
@@ -116,13 +121,27 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) error{User}!b
 					\\Only numbers from {d} to {d} are supported!
 					, .{std.math.minInt(MacroInt), std.math.maxInt(MacroInt)})
 		}
-		return error.User;
+		return e;
 	};
 }
 
-// TODO CONSIDER only logging here and introducing a custom error type for other parse functions
-// TODO CONSIDER ALL exclude linenr from functions
-// TODO CONSIDER MOVE validate out, so that the other functions dont use linenr
+test parse {
+	// TODO ok-cases
+	var ctx = Context.init(gpa);
+	defer ctx.deinit();
+
+	try expectEqual(false, parse("a", 1, &ctx));
+
+	const DoubleEquals = ParseError.DoubleEquals;
+	try expectError(DoubleEquals, parse("a == b", 1, &ctx));
+	try expectError(DoubleEquals, parse("a==b", 1, &ctx));
+	try expectError(DoubleEquals, parse("a ==b", 1, &ctx));
+	try expectError(DoubleEquals, parse("a== b", 1, &ctx));
+	try expectError(DoubleEquals, parse("a   ==       b", 1, &ctx));
+	// TODO NOW DEBUG
+	try expectError(DoubleEquals, parse("(a | b) == (c & d | (e + f))", 1, &ctx));
+}
+
 fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
 	std.debug.print("\nparseOr\n", .{});
 	var result = false;
@@ -157,15 +176,23 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
-	std.debug.print("\nparseCmp\n", .{});
-	const correctTuple = struct {
-		fn f(it: *ParseIterator, buf: *[]const u8, char: u8)
-		error{DoubleEquals, UnexpectedBangOperator}!CompareOperator {
-			if (buf.*[buf.len - 1] == '!') switch (char) {
+	const nextAdjusted = struct {
+		fn f(it: *ParseIterator)
+		error{
+			DoubleEquals,
+			UnclosedParenthesis,
+			UnexpectedBangOperator,
+			UnexpectedOperator
+		}!struct{[]const u8, ?CompareOperator} {
+			var buf: []const u8, const char: u8 = (try it.next()).?;
+			if (buf.len == 0) return ParseError.UnexpectedOperator;
+			if (char == 0) return .{buf, null};
+
+			if (buf[buf.len - 1] == '!') switch (char) {
 				'<', '>' => return ParseError.UnexpectedBangOperator,
 				'=' => {
-					buf.* = buf.*[0..buf.len - 1];
-					return .neq;
+					buf = buf[0..buf.len - 1];
+					return .{buf, .neq};
 				},
 				else => unreachable
 			};
@@ -173,20 +200,20 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 				'<' => {
 					if (it.expr[0] == '=') {
 						it.expr = it.expr[1..];
-						return .lte;
+						return .{buf, .lte};
 					}
-					return .lt;
+					return .{buf, .lt};
 				},
 				'>' => {
 					if (it.expr[0] == '=') {
 						it.expr = it.expr[1..];
-						return .gte;
+						return .{buf, .gte};
 					}
-					return .gt;
+					return .{buf, .gt};
 				},
 				'=' => {
 					if (it.expr[0] == '=') return ParseError.DoubleEquals;
-					return .eq;
+					return .{buf, .eq};
 				},
 				else => unreachable
 			}
@@ -195,25 +222,24 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 	var it = ParseIterator.init(expr, "<>=");
 
-	const lhs_buf: []const u8, var cmp: CompareOperator = lhs_buf_cmp_char: {
-		const lhs_buf: []const u8, const cmp_char: u8 = (try it.next()).?;
-		const cmp: CompareOperator = try correctTuple(it, lhs_buf, cmp_char);
-		break :lhs_buf_cmp_char .{lhs_buf, cmp};
+	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
+	var lhs: MacroInt = lhs: {
+		if (lhs_buf[0] == '(') {
+			const lhs: bool = try parseOr(expr[1..], ctx);
+			break :lhs @intFromBool(lhs);
+		}
+		break :lhs try termValue(lhs_buf, ctx);
 	};
-	std.debug.print("+'{s}'\n", .{lhs_buf});
-	var lhs: MacroInt = try termValue(lhs_buf, ctx);
+	var cmp: CompareOperator = maybe_cmp orelse return lhs > 0;
 
-	// TODO NOW NOW
-	// just wrap it.next() into what lhs_buf_cmp_char: is doing and just use it in the loop
-	// but you have to introduce the next_cmp variable
-	while (try it.next()) |tuple| {
-		const slice: []const u8 = tuple.@"0";
-		const rhs: MacroInt = parse_result: {
+	while (true) {
+		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
+		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
 				const rhs_bool: bool = try parseOr(slice[1..], ctx);
-				break :parse_result @intFromBool(rhs_bool);
+				break :rhs @intFromBool(rhs_bool);
 			}
-			break :parse_result try termValue(slice, ctx);
+			break :rhs try termValue(slice, ctx);
 		};
 		switch (cmp) {
 			.lt => if (lhs >= rhs) return false,
@@ -224,8 +250,8 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 			.neq => if (lhs == rhs) return false,
 		}
 
+		cmp = new_cmp orelse break;
 		lhs = rhs;
-		cmp = try getOperator(&it, tuple.@"1");
 	}
 
 	std.debug.print("\n~parseCmp\n", .{});
@@ -304,7 +330,7 @@ fn termValue(term: []const u8, ctx: *const Context) error{
 		try validateLiteral(literal);
 
 		break :value ctx.macros.get(literal) orelse {
-			if (!ctx.flags.safe) break :value 0;
+			if (!ctx.safe) break :value 0;
 			return error.UndefinedMacro;
 		};
 	};
@@ -325,6 +351,38 @@ error{EmptyLiteral, UnexpectedSpace, UnexpectedLparen, UnexpectedRparen}!void {
 		else => continue
 	};
 }
+
+// TODO TEST
+// a & b
+// a & a
+// a | b
+// a | a
+// (a)
+// a        >          b
+
+// TODO TEST invalid
+// a &
+// a |
+// a <
+// & a
+// | a
+// < a
+// == a
+// a =
+// a = b
+// a !
+// a != b
+// a ! b
+// ! a
+// (a
+// a)
+// a (b)
+// a (b
+// a) b
+// a + b
+// a +- b
+// a &| b
+// a & & b
 
 // TODO ADD test for \t characters
 // TODO ADD test for too much whitespace
