@@ -136,7 +136,7 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 						};
 						if (!std.mem.eql(u8, subkeyword, "if")) {
 							log.errWithLineNr(linenr,
-								"'else' expects nothing or 'if', got '{s}'!",
+								"'else' expects nothing or 'if', found '{s}'!",
 								.{subkeyword});
 							return error.User;
 						}

@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.4   GPL-3.0 license
+	\\v0.3.5   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -99,14 +99,13 @@ fn realMain() error{User, System}!void {
 			File.stdout().writeAll(help_text) catch {};
 			return;
 		}
-		// when encountering undefined variable, exit with error
+		// When encountering undefined variable, exit with error
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			// Shoutout to @MrMineDe for forcing me to implement this feature.
 			ctx.safe = true;
 		}
 		else if (a.startsWith(arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
-			// TODO TEST does it append, overwrite or "over"write if ran multiple times?
 			ctx.output = cwd.createFile(output_path, .{}) catch |e| {
 				logOpenError(e, arg);
 				return error.User;
