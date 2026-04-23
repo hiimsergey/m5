@@ -10,13 +10,7 @@ const Self = @This();
 
 const validateKey = @import("root").validateKey;
 
-flags: packed struct(u8) {
-	// TODO FINAL CHECK implemented
-	verbose: bool = false,
-	// TODO FINAL CHECK implemented
-	safe: bool = false,
-	_: u6 = 0
-} = .{},
+safe: bool = false,
 output: ?File = null,
 input: ?File = null,
 prefix: ?[]const u8 = null,
@@ -188,16 +182,10 @@ pub fn run(self: *Self, gpa: Allocator) error{User, System}!void {
 		}
 	}
 
-	// TODO FINAL ADD new kind of verbose code
-	// if verbose, print "Processed <input>..."
-
 	writer.flush() catch return error.System;
 }
 
-// TODO ERRHANDLE delete file if runtime error
 // TODO ERRHANDLE scope becomes -1
-// TODO dont call after in after body
-// TODO correct back implementation (can you go back in stdout)
 // TODO ERRHANDLE back offset larger than write offset
 // TODO ERRHANDLE resuming without having jumped to after
 // TODO ERRHANDLE resuming with positive scope
