@@ -1,29 +1,30 @@
 const std = @import("std");
+const a = @import("alias.zig");
 const log = @import("log.zig");
 
+const OpenError = std.fs.File.OpenError;
 const AllocatorWrapper = @import("AllocatorWrapper.zig");
 const Context = @import("Context.zig");
 const File = std.fs.File;
 const MacroInt = Context.MacroInt;
 
 const help_text =
-	\\m5 - a simple text file processor
+	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.2.1   GPL-3.0 license
+	\\v0.3.4   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
 	\\Options:
-	\\  --help               Print this message
-	\\  --verbose            Log information while interpreting
-	\\  --safe               Exit with error on encountering undefined variable
+	\\  --help               print this message
+	\\  --safe               exit with error on encountering undefined variable
 	\\
-	\\  -o:<file>            Write result into file
-	\\                       If not given, write to stdout
-	\\  -p:<text>            Set string marking beginning of m5 directive lines
-	\\                       Must be given
-	\\  -d:<key>[=<number>]  Define variable with value
-	\\                       If value not given, default is 1
+	\\  -o:<file>            write result into file
+	\\                         if not given, write to stdout
+	\\  -p:<text>            set string marking beginning of m5 directive lines
+	\\                         must be given
+	\\  -d:<key>[=<number>]  define variable with value
+	\\                         if value not given, default is 1
 	\\
 ;
 
@@ -40,9 +41,8 @@ pub fn main() u8 {
 	return 0;
 }
 
-// TODO CONSIDER MOVE
 pub const validateKey = struct {
-	const banned_chars = "+-*/&|!<>() \t";
+	const banned_chars = "=+-*/&|!<>() \t";
 
 	/// Returns an error and logs if `buf` can't be a valid key.
 	fn f(buf: []const u8) error{User}!void {
@@ -70,7 +70,7 @@ pub const validateKey = struct {
 }.f;
 
 // TODO TEST non-ascii define names, like cyrillic
-// TODO FINAL ALL TEST log.err* branches
+// TODO FINAL ALL TEST log.err* (branch coverage)
 
 fn realMain() error{User, System}!void {
 	var aw = AllocatorWrapper.init();
@@ -90,9 +90,8 @@ fn realMain() error{User, System}!void {
 
 	while (args.next()) |arg| {
 		if (arg[0] != '-') {
-			ctx.input = cwd.openFile(arg, .{ .mode = .read_only }) catch {
-				// TODO switch |e|
-				log.err("Failed to open input '{s}'!", .{arg});
+			ctx.input = cwd.openFile(arg, .{ .mode = .read_only }) catch |e| {
+				logOpenError(e, arg);
 				return error.User;
 			};
 		}
@@ -100,31 +99,20 @@ fn realMain() error{User, System}!void {
 			File.stdout().writeAll(help_text) catch {};
 			return;
 		}
-		// TODO PLAN implement
-		// print every defined variable
-		// red if 0, green otherwise (or any other color)
-		// using ANSI codes, print input & output files and linenr
-		// print just defined variables
-		// print when encountering undefined variable
-		else if (std.mem.eql(u8, arg[1..], "-verbose")) {
-			ctx.flags.verbose = true;
-		}
-		// TODO PLAN implement
 		// when encountering undefined variable, exit with error
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			// Shoutout to @MrMineDe for forcing me to implement this feature.
-			ctx.flags.safe = true;
+			ctx.safe = true;
 		}
-		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
+		else if (a.startsWith(arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
 			// TODO TEST does it append, overwrite or "over"write if ran multiple times?
-			ctx.output = cwd.createFile(output_path, .{}) catch {
-				// TODO switch |e|
-				log.err("Failed to open output '{s}'!", .{output_path});
+			ctx.output = cwd.createFile(output_path, .{}) catch |e| {
+				logOpenError(e, arg);
 				return error.User;
 			};
 		}
-		else if (std.mem.startsWith(u8, arg[1..], "p:")) {
+		else if (a.startsWith(arg[1..], "p:")) {
 			const prefix = arg["-p:".len..];
 			if (prefix.len > ctx._prefix_buf.len) {
 				log.err(
@@ -135,7 +123,7 @@ fn realMain() error{User, System}!void {
 			@memcpy(ctx._prefix_buf[0..prefix.len], prefix);
 			ctx.prefix = ctx._prefix_buf[0..prefix.len];
 		}
-		else if (std.mem.startsWith(u8, arg[1..], "d:")) {
+		else if (a.startsWith(arg[1..], "d:")) {
 			const key: []const u8, const value: MacroInt = try readDefinition(arg);
 			ctx.macros.put(key, value) catch return error.System;
 		}
@@ -160,16 +148,27 @@ fn realMain() error{User, System}!void {
 	}
 
 	// If no -o flag given, print to stdout.
-	if (ctx.output == null) ctx.output = File.stdout();
+	ctx.output = ctx.output orelse File.stdout();
 
 	// This is where the fun begins!
 	return ctx.run(gpa);
 }
 
+/// Does proper logging on failed file opening/creation.
+fn logOpenError(e: OpenError, arg: []const u8) void {
+	switch (e) {
+		OpenError.FileNotFound =>
+			log.err("Input '{s}' does not exist!", .{arg}),
+		OpenError.AccessDenied =>
+			log.err("Permission denied to open input '{s}'!", .{arg}),
+		OpenError.IsDir =>
+			log.err("Input '{s}' is not a file but a dir!", .{arg}),
+		else => log.err("Failed to open input '{s}'!", .{arg})
+	}
+}
+
 /// Logs on error.
 fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } {
-	// '=' is also banned, of course, but is guaranteed to not appear in
-	// the key string.
 	const definition = flag["-d:".len..];
 
 	const key_cand: []const u8, const value: MacroInt = kv: {
@@ -177,20 +176,18 @@ fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } 
 			break :kv .{definition, 1};
 
 		const key_cand = definition[0..eq_index];
-		const value_buf: []const u8 = definition[eq_index + 1..];
-		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| switch (e) {
-			error.Overflow => {
-				log.err(
+		const value_buf: []const u8 = a.trimWEnd(definition[eq_index + 1..]);
+		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| {
+			switch (e) {
+				error.Overflow => log.err(
 					\\Number {s} is not representable!"
 					\\Only numbers from {d} to {d} are supported!
 					, .{value_buf, std.math.minInt(MacroInt), std.math.maxInt(MacroInt)}
-				);
-				return error.User;
-			},
-			error.InvalidCharacter => {
-				log.err("Value '{s}' is not a valid number!", .{value_buf});
-				return error.User;
+				),
+				error.InvalidCharacter => log.err("Value '{s}' is not a valid number!",
+					.{value_buf})
 			}
+			return error.User;
 		};
 
 		break :kv .{key_cand, value};
@@ -200,4 +197,7 @@ fn readDefinition(flag: []const u8) error{User}!struct { []const u8, MacroInt } 
 	return .{key_cand, value};
 }
 
-test { _ = @import("test.zig"); }
+test {
+	_ = @import("parser.zig");
+	_ = @import("test.zig");
+}

@@ -9,17 +9,24 @@ pub const stderr = &stderr_wrapper.interface;
 
 pub fn err(comptime fmt: []const u8, args: anytype) void {
 	stderr.print(error_tag, .{}) catch {};
-	stderr.print(fmt ++ "\n", args) catch {};
+
+	const fmt_indented: []const u8 = comptime fmt_indented: {
+		var it = std.mem.tokenizeScalar(u8, fmt, '\n');
+		const spaces: ["error: ".len]u8 = @splat(' ');
+
+		var result = it.next().?;
+		while (it.next()) |line| result = result ++ "\n" ++ spaces ++ line;
+		result = result ++ "\n";
+		break :fmt_indented result;
+	};
+
+	stderr.print(fmt_indented, args) catch {};
 }
 
 pub fn errWithHelp(comptime fmt: []const u8, args: anytype) void {
-	stderr.print(error_tag, .{}) catch {};
-	stderr.print(fmt ++ "\n", args) catch {};
-	stderr.print("See `m5 --help` for correct usage!\n", .{}) catch {};
+	err(fmt ++ "\nSee `m5 --help` for correct usage!", args);
 }
 
 pub fn errWithLineNr(linenr: usize, comptime fmt: []const u8, args: anytype) void {
-	stderr.print(error_tag, .{}) catch {};
-	stderr.print("line {d}: ", .{linenr}) catch {};
-	stderr.print(fmt ++ "\n", args) catch {};
+	err("line {d}: " ++ fmt, .{linenr} ++ args);
 }
