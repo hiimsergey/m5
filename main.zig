@@ -29,7 +29,7 @@ const help_text =
 ;
 
 pub fn main(init: Init) u8 {
-	log.init(init.io);
+	log.setup(init.io);
 	defer log.stderr.flush() catch {};
 
 	realMain(init) catch |e| switch (e) {
@@ -159,12 +159,10 @@ fn realMain(init: Init) error{User, System}!void {
 /// Does proper lgoging on failed file opening.
 fn logOpenError(e: OpenError, arg: []const u8) void {
 	switch (e) {
-		OpenError.FileNotFound =>
-			log.err("Input '{s}' does not exist!", .{arg}),
+		OpenError.FileNotFound => log.err("Input '{s}' does not exist!", .{arg}),
 		OpenError.AccessDenied =>
-			log.err("Permission denied to open input '{s}'!", .{arg}),
-		OpenError.IsDir =>
-			log.err("Input '{s}' is not a file but a dir!", .{arg}),
+			log.err("Permission to open input '{s}' denied!", .{arg}),
+		OpenError.IsDir => log.err("Input '{s}' is not a file but a dir!", .{arg}),
 		else => log.err("Failed to open input '{s}'!", .{arg})
 	}
 }

@@ -8,7 +8,7 @@ pub var stderr: *Io.Writer = undefined;
 var stderr_buf: [128]u8 = undefined;
 var stderr_wrapper: Io.File.Writer = undefined;
 
-pub fn init(io: Io) void {
+pub fn setup(io: Io) void {
 	stderr_wrapper = Io.File.stderr().writer(io, &stderr_buf);
 	stderr = &stderr_wrapper.interface;
 }
