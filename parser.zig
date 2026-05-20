@@ -128,7 +128,7 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 test parse {
 	// TODO ok-cases
 	var ctx = Context.init(gpa);
-	defer ctx.deinit();
+	defer ctx.deinit(std.testing.io);
 
 	try expectEqual(false, parse("a", 1, &ctx));
 

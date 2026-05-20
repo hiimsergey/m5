@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.6   GPL-3.0 license
+	\\v0.3.7   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -144,10 +144,9 @@ fn realMain(init: Init) error{User, System}!void {
 		}
 		ctx.input = stdin;
 	}
-	if (ctx.prefix == null) {
-		log.errWithHelp("Prefix must be given with the -p flag!", .{});
-		return error.User;
-	}
+
+	// If no -p flag given, use "m5" as default.
+	ctx.prefix = ctx.prefix orelse "m5";
 
 	// If no -o flag given, print to stdout.
 	ctx.output = ctx.output orelse File.stdout();
