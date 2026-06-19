@@ -28,6 +28,11 @@ const TermValueError = error{
 const ParseError = NextAdjustedError || TermValueError;
 
 const ParseIterator = struct {
+	const Next = struct {
+		item: []const u8,
+		matched: u8
+	};
+
 	expr: []const u8,
 	tokens: []const u8,
 
@@ -41,30 +46,34 @@ const ParseIterator = struct {
 	/// Returns `error.UnclosedParenthesis` if expression contains unclosed opening
 	/// parenthesis.
 	/// Does not log.
-	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?struct {[]const u8, u8} {
+	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?Next {
 		if (self.expr.len == 0) return null;
 		self.expr = a.trimWStart(self.expr);
 
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
 			if (self.expr[i] == '(') {
-				_ = try self.closeParen(&i);
-				continue;
+				const start_i = i;
+				try self.closeParen(&i);
+				defer self.expr = self.expr[i + 1..];
+				return .{ .item = self.expr[start_i..i], .matched = 0 };
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
 				defer self.expr = self.expr[i + 1..];
-				return .{self.expr[0..i], self.expr[i]};
+				return .{ .item = self.expr[0..i], .matched = self.expr[i] };
 			}
 		}
 
 		// In the case that we're returning the whole remaining string, we will not need
-		// the token, therefore we use 0 as a dontcare.
+		// the token and thus return 0 as a decoy value.
+		// (?u8 would take up more space, as of now :pensive:)
 		defer self.expr = "";
-		return .{self.expr, 0};
+		return .{ .item = self.expr, .matched = 0 };
 	}
 
 	// TODO this function should errhandle the condition
 	/// Called when first character in buffer is opening parenthesis.
+	/// TODO NOW change this comment
 	/// Returns slice ending with its corresponding closing parenthesis and advances
 	/// iterator.
 	/// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
@@ -146,10 +155,9 @@ fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var result = false;
 
 	var it = ParseIterator.init(expr, "|");
-	while (try it.next()) |tuple| {
-		const slice: []const u8 = tuple.@"0";
-		const parse_result = if (slice[0] == '(') try parseOr(slice[1..], ctx)
-			else try parseAnd(slice, ctx);
+	while (try it.next()) |next| {
+		const parse_result = if (next.item[0] == '(') try parseOr(next.item[1..], ctx)
+			else try parseAnd(next.item, ctx);
 		result = result or parse_result;
 	}
 	return result;
@@ -159,10 +167,9 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var result = true;
 
 	var it = ParseIterator.init(expr, "&");
-	while (try it.next()) |tuple| {
-		const slice: []const u8 = tuple.@"0";
-		const parse_result = if (slice[0] == '(') try parseOr(slice[1..], ctx)
-			else try parseCmp(slice, ctx);
+	while (try it.next()) |next| {
+		const parse_result = if (next.item[0] == '(') try parseOr(next.item[1..], ctx)
+			else try parseCmp(next.item, ctx);
 		result = result and parse_result;
 	}
 	return result;
@@ -171,13 +178,16 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const nextAdjusted = struct {
+		/// Instead of returning an item and the matched token, this function looks forward
+		/// and alters the upcoming string to determine the correct comparison operator.
 		fn f(it: *ParseIterator)
 		NextAdjustedError!struct {[]const u8, ?CompareOperator} {
-			var buf: []const u8, const char: u8 = (try it.next()).?;
+			const next: ParseIterator.Next = (try it.next()).?;
+			var buf: []const u8 = next.item;
 			if (buf.len == 0) return NextAdjustedError.UnexpectedOperator;
-			if (char == 0) return .{buf, null};
+			if (next.matched == 0) return .{buf, null};
 
-			if (buf[buf.len - 1] == '!') switch (char) {
+			if (buf[buf.len - 1] == '!') switch (next.matched) {
 				'<', '>' => return NextAdjustedError.UnexpectedBangOperator,
 				'=' => {
 					buf = buf[0..buf.len - 1];
@@ -185,7 +195,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 				},
 				else => unreachable
 			};
-			switch (char) {
+			switch (next.matched) {
 				'<' => {
 					if (it.expr[0] == '=') {
 						it.expr = it.expr[1..];
@@ -246,7 +256,6 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	return true;
 }
 
-/// Logs on error.
 fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 	// TODO NOW CONSIDER check for illegal characters
 	// there's a reason not to, cause maybe validateKey used to do the job at the
@@ -266,12 +275,11 @@ fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 		};
 	};
 
-	if (!negate) return value;
-	return @intFromBool(value == 0);
+	if (negate) return @intFromBool(value == 0);
+	return value;
 }
 
-/// Returns an error and logs if iterator item contains syntax error.
-/// Logs on error.
+/// Returns an error if iterator item contains syntax error.
 fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 	if (buf.len == 0) return ValidateLiteralError.EmptyLiteral;
 	for (buf) |c| switch (c) {
@@ -287,7 +295,12 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 // a | b
 // a | a
 // (a)
+// (a = b)
+// (a = b) = (c = d)
 // a        >          b
+// a = b
+// a <= b
+// a >= b
 
 // TODO TEST invalid
 // a &
@@ -297,8 +310,8 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 // | a
 // < a
 // == a
+// a == b
 // a =
-// a = b
 // a !
 // a != b
 // a ! b
@@ -312,6 +325,17 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 // a +- b
 // a &| b
 // a & & b
+// a << b
+// a < < b
+// a >> b
+// a > > b
+// a <> b
+// a < > b
+// a <=> b
+// a => b
+
+// TODO TEST unsure
+// a<b
 
 // TODO ADD test for \t characters
 // TODO ADD test for too much whitespace
