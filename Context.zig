@@ -115,7 +115,8 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 							return error.User;
 						}
 
-						const parse_result = parser.parse(expression, linenr, self) catch
+						const parse_result: bool =
+							parser.parse(expression, linenr, self) catch
 							return error.User;
 						if (parse_result) continue;
 						state = .dont_write;
@@ -145,7 +146,8 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 							return error.User;
 						}
 
-						const parse_result = parser.parse(expression, linenr, self) catch
+						const parse_result: bool =
+							parser.parse(expression, linenr, self) catch
 							return error.User;
 						state = if (parse_result) .write else .dont_write;
 					},
