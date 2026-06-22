@@ -27,6 +27,14 @@ const TermValueError = error{
 } || ValidateLiteralError;
 const ParseError = NextAdjustedError || TermValueError;
 
+// TODO REMOVE
+var lvl: usize = 0;
+
+fn println(comptime fmt: []const u8, args: anytype) void {
+	for (0..lvl) |_| std.debug.print("    ", .{});
+	std.debug.print(fmt ++ "\n", args);
+}
+
 const ParseIterator = struct {
 	const Next = struct {
 		item: []const u8,
@@ -59,6 +67,7 @@ const ParseIterator = struct {
 				return .{ .item = self.expr[start_i..i], .matched = 0 };
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
+				std.debug.print("lmaooooooooooooo '{s}', '{d}'", .{self.expr, i});
 				defer self.expr = self.expr[i + 1..];
 				return .{ .item = self.expr[0..i], .matched = self.expr[i] };
 			}
@@ -152,24 +161,37 @@ test parse {
 }
 
 fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
+	println("parseOr '{s}'", .{expr});
 	var result = false;
+
+	lvl += 1;
+	defer lvl -= 1;
 
 	var it = ParseIterator.init(expr, "|");
 	while (try it.next()) |next| {
-		const parse_result = if (next.item[0] == '(') try parseOr(next.item[1..], ctx)
-			else try parseAnd(next.item, ctx);
+		const parse_result: bool =
+			if (next.item[0] == '(') try parseOr(next.item[1..], ctx) else
+			try parseAnd(next.item, ctx);
+		println("'{s}' -> {d}", .{next.item, @intFromBool(parse_result)});
 		result = result or parse_result;
 	}
 	return result;
 }
 
 fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
+	println("parseAnd '{s}'", .{expr});
 	var result = true;
 
 	var it = ParseIterator.init(expr, "&");
+
+	lvl += 1;
+	defer lvl -= 1;
+
 	while (try it.next()) |next| {
-		const parse_result = if (next.item[0] == '(') try parseOr(next.item[1..], ctx)
-			else try parseCmp(next.item, ctx);
+		const parse_result: bool =
+			if (next.item[0] == '(') try parseOr(next.item[1..], ctx) else
+			try parseCmp(next.item, ctx);
+		println("'{s}' -> {d}", .{next.item, @intFromBool(parse_result)});
 		result = result and parse_result;
 	}
 	return result;
