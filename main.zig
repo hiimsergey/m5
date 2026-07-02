@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.8   GPL-3.0 license
+	\\v0.3.9   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -85,6 +85,7 @@ fn realMain(init: Init) error{User, System}!void {
 	defer ctx.deinit(io);
 
 	const stdin = File.stdin();
+
 	const input_from_pipe: bool = input_from_pipe: {
 		const isatty: bool = stdin.isTty(io) catch return error.System;
 		break :input_from_pipe !isatty;
@@ -155,7 +156,7 @@ fn realMain(init: Init) error{User, System}!void {
 	return ctx.run(gpa, io);
 }
 
-/// Does proper lgoging on failed file opening.
+/// Does proper logging on failed file opening.
 fn logOpenError(e: OpenError, arg: []const u8) void {
 	switch (e) {
 		OpenError.FileNotFound => log.err("Input '{s}' does not exist!", .{arg}),

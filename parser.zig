@@ -27,13 +27,6 @@ const TermValueError = error{
 } || ValidateLiteralError;
 const ParseError = NextAdjustedError || TermValueError;
 
-// TODO REMOVE
-var lvl: usize = 0;
-fn println(comptime fmt: []const u8, args: anytype) void {
-	for (0..lvl) |_| std.debug.print("    ", .{});
-	std.debug.print(fmt ++ "\n", args);
-}
-
 const ParseIterator = struct {
 	const Next = struct {
 		item: []const u8,
@@ -110,7 +103,9 @@ const ParseState = enum(u8) {
 
 /// Logs on error.
 pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bool {
-	return parseOr(expr, ctx) catch |e| {
+	std.debug.assert(expr.len > 0);
+
+	return parseGates(expr, ctx) catch |e| {
 		switch (e) {
 			ParseError.DoubleEquals =>
 				log.errWithLineNr(linenr, "Don't use '=='! Use '=' instead!", .{}),
@@ -157,40 +152,36 @@ test parse {
 	try expectError(DoubleEquals, parse("(a | b) == (c & d | (e + f))", 1, &ctx));
 }
 
-fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
-	println("parseOr '{s}'", .{expr});
-	var result = false;
+fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
+	var result = true;
+	var matched: u8 = '&';
 
-	lvl += 1;
-	defer lvl -= 1;
-
-	// TODO NOW DEBUG false doesnt show up in iterator
-	// instead, it should return the entire string
-	var it = ParseIterator.init(expr, "|");
+	var it = ParseIterator.init(expr, "&|");
 	while (try it.next()) |next| {
 		const parse_result: bool =
-			if (next.item[0] == '(') try parseOr(next.item[1..next.item.len - 1], ctx) else
-			try parseAnd(next.item, ctx);
-		println("'{s}' -> {d}", .{next.item, @intFromBool(parse_result)});
-		result = result or parse_result;
+			if (next.item[0] == '(') try parseGates(next.item[1..next.item.len - 1], ctx) else
+			try parseCmp(next.item, ctx);
+
+		result = switch (matched) {
+			'&' => result and parse_result,
+			'|' => result or parse_result,
+			else => unreachable
+		};
+		matched = next.matched;
 	}
 	return result;
 }
 
+// TODO REMOVE
 fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
-	println("parseAnd '{s}'", .{expr});
 	var result = true;
 
 	var it = ParseIterator.init(expr, "&");
 
-	lvl += 1;
-	defer lvl -= 1;
-
 	while (try it.next()) |next| {
 		const parse_result: bool =
-			if (next.item[0] == '(') try parseOr(next.item[1..next.item.len - 1], ctx) else
+			if (next.item[0] == '(') try parseGates(next.item[1..next.item.len - 1], ctx) else
 			try parseCmp(next.item, ctx);
-		println("'{s}' -> {d}", .{next.item, @intFromBool(parse_result)});
 		result = result and parse_result;
 	}
 	return result;
@@ -246,7 +237,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
 			// TODO TEST why are we using expr here instead of lhs_buf?
-			const lhs: bool = try parseOr(expr[1..expr.len - 1], ctx);
+			const lhs: bool = try parseGates(expr[1..expr.len - 1], ctx);
 			break :lhs @intFromBool(lhs);
 		}
 		break :lhs try termValue(lhs_buf, ctx);
@@ -257,7 +248,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
 		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
-				const rhs_bool: bool = try parseOr(slice[1..slice.len - 1], ctx);
+				const rhs_bool: bool = try parseGates(slice[1..slice.len - 1], ctx);
 				break :rhs @intFromBool(rhs_bool);
 			}
 			break :rhs try termValue(slice, ctx);
