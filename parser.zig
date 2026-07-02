@@ -29,7 +29,6 @@ const ParseError = NextAdjustedError || TermValueError;
 
 // TODO REMOVE
 var lvl: usize = 0;
-
 fn println(comptime fmt: []const u8, args: anytype) void {
 	for (0..lvl) |_| std.debug.print("    ", .{});
 	std.debug.print(fmt ++ "\n", args);
@@ -61,13 +60,11 @@ const ParseIterator = struct {
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
 			if (self.expr[i] == '(') {
-				const start_i = i;
 				try self.closeParen(&i);
 				defer self.expr = self.expr[i + 1..];
-				return .{ .item = self.expr[start_i..i], .matched = 0 };
+				return .{ .item = self.expr[0..i + 1], .matched = 0 };
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
-				std.debug.print("lmaooooooooooooo '{s}', '{d}'", .{self.expr, i});
 				defer self.expr = self.expr[i + 1..];
 				return .{ .item = self.expr[0..i], .matched = self.expr[i] };
 			}
@@ -167,10 +164,12 @@ fn parseOr(expr: []const u8, ctx: *const Context) ParseError!bool {
 	lvl += 1;
 	defer lvl -= 1;
 
+	// TODO NOW DEBUG false doesnt show up in iterator
+	// instead, it should return the entire string
 	var it = ParseIterator.init(expr, "|");
 	while (try it.next()) |next| {
 		const parse_result: bool =
-			if (next.item[0] == '(') try parseOr(next.item[1..], ctx) else
+			if (next.item[0] == '(') try parseOr(next.item[1..next.item.len - 1], ctx) else
 			try parseAnd(next.item, ctx);
 		println("'{s}' -> {d}", .{next.item, @intFromBool(parse_result)});
 		result = result or parse_result;
@@ -189,7 +188,7 @@ fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 	while (try it.next()) |next| {
 		const parse_result: bool =
-			if (next.item[0] == '(') try parseOr(next.item[1..], ctx) else
+			if (next.item[0] == '(') try parseOr(next.item[1..next.item.len - 1], ctx) else
 			try parseCmp(next.item, ctx);
 		println("'{s}' -> {d}", .{next.item, @intFromBool(parse_result)});
 		result = result and parse_result;
@@ -246,7 +245,8 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
-			const lhs: bool = try parseOr(expr[1..], ctx);
+			// TODO TEST why are we using expr here instead of lhs_buf?
+			const lhs: bool = try parseOr(expr[1..expr.len - 1], ctx);
 			break :lhs @intFromBool(lhs);
 		}
 		break :lhs try termValue(lhs_buf, ctx);
@@ -257,7 +257,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
 		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
-				const rhs_bool: bool = try parseOr(slice[1..], ctx);
+				const rhs_bool: bool = try parseOr(slice[1..slice.len - 1], ctx);
 				break :rhs @intFromBool(rhs_bool);
 			}
 			break :rhs try termValue(slice, ctx);
@@ -311,11 +311,14 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 	};
 }
 
+// TODO NOW DEBUG .if false & (true | true)
+
 // TODO TEST
 // a & b
 // a & a
 // a | b
 // a | a
+// false & (true | true)
 // (a)
 // (a = b)
 // (a = b) = (c = d)
