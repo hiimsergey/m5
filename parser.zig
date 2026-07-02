@@ -6,8 +6,6 @@ const CompareOperator = std.math.CompareOperator;
 const Context = @import("Context.zig");
 const MacroInt = Context.MacroInt;
 
-const expectEqual = std.testing.expectEqual;
-const expectError = std.testing.expectError;
 const gpa = std.testing.allocator;
 
 const NextAdjustedError = error{
@@ -17,7 +15,7 @@ const NextAdjustedError = error{
 	UnexpectedOperator
 };
 const ValidateLiteralError = error{
-	EmptyLiteral,
+	Empty,
 	UnexpectedExpression,
 	UnexpectedRparen
 };
@@ -111,7 +109,7 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 				log.errWithLineNr(linenr, "Don't use '=='! Use '=' instead!", .{}),
 			ParseError.UnclosedParenthesis =>
 				log.errWithLineNr(linenr, "Unclosed parenthesis!", .{}),
-			ParseError.EmptyLiteral =>
+			ParseError.Empty =>
 				log.errWithLineNr(linenr,
 					"Expected expression, found empty literal!", .{}),
 			ParseError.UndefinedMacro =>
@@ -136,20 +134,72 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 }
 
 test parse {
-	// TODO ok-cases
+	const expTrue = struct {
+		fn f(expr: []const u8, ctx: *const Context) !void {
+			return try std.testing.expectEqual(true, parse(expr, 1, ctx));
+		}
+	}.f;
+	const expFalse = struct {
+		fn f(expr: []const u8, ctx: *const Context) !void {
+			return try std.testing.expectEqual(false, parse(expr, 1, ctx));
+		}
+	}.f;
+	const expError = struct {
+		fn f(e: ParseError, expr: []const u8, ctx: *const Context) !void {
+			return try std.testing.expectError(e, parse(expr, 1, ctx));
+		}
+	}.f;
+
 	var ctx = Context.init(gpa);
 	defer ctx.deinit(std.testing.io);
+	try ctx.macros.put("true", 1);
+	try ctx.macros.put("ft", 42);
 
-	try expectEqual(false, parse("a", 1, &ctx));
+	try expTrue("true", &ctx);
+	try expTrue("(  true )", &ctx);
+	try expTrue("(((true)))", &ctx);
+	try expTrue("( ( true ) )", &ctx);
+	try expTrue("true & true", &ctx);
+	try expTrue("true&true", &ctx);
+	try expTrue("true = true", &ctx);
+	try expTrue("true=true", &ctx);
+	try expTrue("(true = true)", &ctx);
+	try expTrue("(true = true) = (!false = !false)", &ctx);
+	try expTrue("(true = !false) = (!false = true)", &ctx);
+	try expTrue("!false", &ctx);
+	try expTrue("true | true", &ctx);
+	try expTrue("true | false", &ctx);
+	try expTrue("false | true", &ctx);
+	try expTrue("false & true | true", &ctx);
+	try expTrue("true > false", &ctx);
+	try expTrue("true>false", &ctx);
+	try expTrue("true      >   false", &ctx);
+	try expTrue("true >= false", &ctx);
+	try expTrue("true>=false", &ctx);
+	try expTrue("true      >=   false", &ctx);
+	try expTrue("false <= true", &ctx);
+	try expTrue("false<=true", &ctx);
+	try expTrue("false      <=   true", &ctx);
+
+	try expFalse("false", &ctx);
+	try expFalse("(false)", &ctx);
+	try expFalse("false | false", &ctx);
+	try expFalse("false & false", &ctx);
+	try expFalse("false < false", &ctx);
+	try expFalse("false > false", &ctx);
+	try expFalse("false | false & false", &ctx);
+	try expFalse("false & (true | true)", &ctx);
 
 	const DoubleEquals = ParseError.DoubleEquals;
-	try expectError(DoubleEquals, parse("a == b", 1, &ctx));
-	try expectError(DoubleEquals, parse("a==b", 1, &ctx));
-	try expectError(DoubleEquals, parse("a ==b", 1, &ctx));
-	try expectError(DoubleEquals, parse("a== b", 1, &ctx));
-	try expectError(DoubleEquals, parse("a   ==       b", 1, &ctx));
+	try expError(DoubleEquals, "a == b", &ctx);
+	try expError(DoubleEquals, "a==b", &ctx);
+	try expError(DoubleEquals, "a ==b", &ctx);
+	try expError(DoubleEquals, "a== b", &ctx);
+	try expError(DoubleEquals, "a   ==       b", &ctx);
 	// TODO NOW DEBUG
-	try expectError(DoubleEquals, parse("(a | b) == (c & d | (e + f))", 1, &ctx));
+	try expError(DoubleEquals, "(a | b) == (c & d | (e + f))", &ctx);
+
+	try expError(ParseError.UnexpectedOperator, "true < = false", &ctx);
 }
 
 fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
@@ -168,21 +218,6 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 			else => unreachable
 		};
 		matched = next.matched;
-	}
-	return result;
-}
-
-// TODO REMOVE
-fn parseAnd(expr: []const u8, ctx: *const Context) ParseError!bool {
-	var result = true;
-
-	var it = ParseIterator.init(expr, "&");
-
-	while (try it.next()) |next| {
-		const parse_result: bool =
-			if (next.item[0] == '(') try parseGates(next.item[1..next.item.len - 1], ctx) else
-			try parseCmp(next.item, ctx);
-		result = result and parse_result;
 	}
 	return result;
 }
@@ -294,7 +329,7 @@ fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 
 /// Returns an error if iterator item contains syntax error.
 fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
-	if (buf.len == 0) return ValidateLiteralError.EmptyLiteral;
+	if (buf.len == 0) return ValidateLiteralError.Empty;
 	for (buf) |c| switch (c) {
 		' ', '(' => return ValidateLiteralError.UnexpectedExpression,
 		')' => return ValidateLiteralError.UnexpectedRparen,
@@ -305,18 +340,8 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 // TODO NOW DEBUG .if false & (true | true)
 
 // TODO TEST
-// a & b
-// a & a
-// a | b
-// a | a
-// false & (true | true)
-// (a)
-// (a = b)
-// (a = b) = (c = d)
-// a        >          b
-// a = b
-// a <= b
-// a >= b
+// a < b < c
+// a<b<c
 
 // TODO TEST invalid
 // a &
