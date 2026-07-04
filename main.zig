@@ -30,6 +30,8 @@ const help_text =
 
 pub fn main(init: Init) u8 {
 	log.setup(init.io);
+	log.stderr.print("TODO aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", .{}) catch {}; // TODO
+	log.stderr.flush() catch {}; // TODO
 	defer log.stderr.flush() catch {};
 
 	realMain(init) catch |e| switch (e) {

@@ -100,6 +100,8 @@ const ParseState = enum(u8) {
 	expecting_operator
 };
 
+/// Evaluates given expression to either true or false, taking defined variables in `ctx`
+/// into consideration.
 /// Logs on error.
 pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bool {
 	std.debug.assert(expr.len > 0);
@@ -150,6 +152,8 @@ test parse {
 			return try std.testing.expectError(e, parse(expr, 1, ctx));
 		}
 	}.f;
+
+	log.setup(std.testing.io);
 
 	var ctx = Context.init(gpa);
 	defer ctx.deinit(std.testing.io);

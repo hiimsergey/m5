@@ -2,10 +2,10 @@ const std = @import("std");
 
 const Io = std.Io;
 
-const error_tag = "\x1b[31;1merror:\x1b[0m ";
+const error_tag = "error: ";
 
 pub var stderr: *Io.Writer = undefined;
-var stderr_buf: [128]u8 = undefined;
+var stderr_buf: [256]u8 = undefined;
 var stderr_wrapper: Io.File.Writer = undefined;
 
 pub fn setup(io: Io) void {
@@ -14,11 +14,15 @@ pub fn setup(io: Io) void {
 }
 
 pub fn err(comptime fmt: []const u8, args: anytype) void {
-	stderr.print(error_tag, .{}) catch {};
+	stderr.print("\x1b[31;1m" ++ error_tag ++ "\x1b[0m", .{}) catch |e| {
+		// TODO
+		std.debug.print("TODO hello", .{});
+		std.debug.print("{s}\n", .{@errorName(e)});
+	};
 
 	const fmt_indented: []const u8 = comptime fmt_indented: {
 		var it = std.mem.tokenizeScalar(u8, fmt, '\n');
-		const spaces: ["error: ".len]u8 = @splat(' ');
+		const spaces: [error_tag.len]u8 = @splat(' ');
 
 		var result = it.next().?;
 		while (it.next()) |line| result = result ++ "\n" ++ spaces ++ line;
@@ -26,7 +30,10 @@ pub fn err(comptime fmt: []const u8, args: anytype) void {
 		break :fmt_indented result;
 	};
 
-	stderr.print(fmt_indented, args) catch {};
+	stderr.print(fmt_indented, args) catch |e| {
+		// TODO
+		std.debug.print("{s}\n", .{@errorName(e)});
+	};
 }
 
 pub fn errWithHelp(comptime fmt: []const u8, args: anytype) void {
