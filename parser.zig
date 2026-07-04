@@ -51,7 +51,8 @@ const ParseIterator = struct {
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
 			if (self.expr[i] == '(') {
-				try self.closeParen(&i);
+				try self.findCloseParen(&i);
+				// TODO NOW DEBUG this is the part
 				defer self.expr = self.expr[i + 1..];
 				return .{ .item = self.expr[0..i + 1], .matched = 0 };
 			}
@@ -75,7 +76,7 @@ const ParseIterator = struct {
 	/// iterator.
 	/// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
 	/// Does not log.
-	fn closeParen(self: *ParseIterator, i: *usize) error{UnclosedParenthesis}!void {
+	fn findCloseParen(self: *ParseIterator, i: *usize) error{UnclosedParenthesis}!void {
 		i.* += 1;
 		var scope: usize = 1;
 		while (i.* < self.expr.len) : (i.* += 1) switch (self.expr[i.*]) {
@@ -203,14 +204,16 @@ test parse {
 }
 
 fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
+	// These variable could ofc also be false and '|', respectively.
 	var result = true;
 	var matched: u8 = '&';
 
 	var it = ParseIterator.init(expr, "&|");
 	while (try it.next()) |next| {
-		const parse_result: bool =
-			if (next.item[0] == '(') try parseGates(next.item[1..next.item.len - 1], ctx) else
-			try parseCmp(next.item, ctx);
+		const parse_result: bool = if (next.item[0] == '(') parse_result: {
+			const parens_unwrapped: []const u8 = a.unwrapParens(next.item);
+			break :parse_result try parseGates(parens_unwrapped, ctx);
+		} else try parseCmp(next.item, ctx);
 
 		result = switch (matched) {
 			'&' => result and parse_result,
@@ -271,8 +274,9 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
+			const parens_unwrapped: []const u8 = a.unwrapParens(expr);
 			// TODO TEST why are we using expr here instead of lhs_buf?
-			const lhs: bool = try parseGates(expr[1..expr.len - 1], ctx);
+			const lhs: bool = try parseGates(parens_unwrapped, ctx);
 			break :lhs @intFromBool(lhs);
 		}
 		break :lhs try termValue(lhs_buf, ctx);
@@ -283,7 +287,8 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
 		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
-				const rhs_bool: bool = try parseGates(slice[1..slice.len - 1], ctx);
+				const parens_unwrapped: []const u8 = a.unwrapParens(slice);
+				const rhs_bool: bool = try parseGates(parens_unwrapped, ctx);
 				break :rhs @intFromBool(rhs_bool);
 			}
 			break :rhs try termValue(slice, ctx);
