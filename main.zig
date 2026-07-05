@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.10   GPL-3.0 license
+	\\v0.3.11   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -30,8 +30,6 @@ const help_text =
 
 pub fn main(init: Init) u8 {
 	log.setup(init.io);
-	log.stderr.print("TODO aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", .{}) catch {}; // TODO
-	log.stderr.flush() catch {}; // TODO
 	defer log.stderr.flush() catch {};
 
 	realMain(init) catch |e| switch (e) {

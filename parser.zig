@@ -51,10 +51,12 @@ const ParseIterator = struct {
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
 			if (self.expr[i] == '(') {
-				try self.findCloseParen(&i);
-				// TODO NOW DEBUG this is the part
-				defer self.expr = self.expr[i + 1..];
-				return .{ .item = self.expr[0..i + 1], .matched = 0 };
+				std.debug.print("oops '{s}'\n", .{self.expr});
+				i += try findCloseParen(self.expr[i..]);
+				continue;
+				// // TODO NOW DEBUG this is the part
+				// defer self.expr = self.expr[i + 1..];
+				// return .{ .item = self.expr[0..i + 1], .matched = 0 };
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
 				defer self.expr = self.expr[i + 1..];
@@ -67,27 +69,6 @@ const ParseIterator = struct {
 		// (?u8 would take up more space, as of now :pensive:)
 		defer self.expr = "";
 		return .{ .item = self.expr, .matched = 0 };
-	}
-
-	// TODO this function should errhandle the condition
-	/// Called when first character in buffer is opening parenthesis.
-	/// TODO NOW change this comment
-	/// Returns slice ending with its corresponding closing parenthesis and advances
-	/// iterator.
-	/// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
-	/// Does not log.
-	fn findCloseParen(self: *ParseIterator, i: *usize) error{UnclosedParenthesis}!void {
-		i.* += 1;
-		var scope: usize = 1;
-		while (i.* < self.expr.len) : (i.* += 1) switch (self.expr[i.*]) {
-			'(' => scope += 1,
-			')' => {
-				scope -= 1;
-				if (scope == 0) return;
-			},
-			else => continue
-		};
-		return error.UnclosedParenthesis;
 	}
 };
 
@@ -154,12 +135,14 @@ test parse {
 	}.f;
 
 	log.setup(std.testing.io);
+	defer log.stderr.flush() catch {};
 
 	var ctx = Context.init(gpa);
 	defer ctx.deinit(std.testing.io);
 	try ctx.macros.put("true", 1);
 	try ctx.macros.put("ft", 42);
 
+	// TODO
 	try expTrue("true", &ctx);
 	try expTrue("(  true )", &ctx);
 	try expTrue("(((true)))", &ctx);
@@ -185,6 +168,14 @@ test parse {
 	try expTrue("false <= true", &ctx);
 	try expTrue("false<=true", &ctx);
 	try expTrue("false      <=   true", &ctx);
+	try expTrue("ft", &ctx);
+	try expTrue("ft = 42", &ctx);
+	try expTrue("ft != 0", &ctx);
+	try expTrue("ft > 0", &ctx);
+	try expTrue("ft >= 0", &ctx);
+	try expTrue("ft < 43", &ctx);
+	try expTrue("ft <= 43", &ctx);
+	try expTrue("ft > true", &ctx);
 
 	try expFalse("false", &ctx);
 	try expFalse("(false)", &ctx);
@@ -214,8 +205,10 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 	var it = ParseIterator.init(expr, "&|");
 	while (try it.next()) |next| {
+		std.debug.print("parseGates/next '{s}'\n", .{next.item});
 		const parse_result: bool = if (next.item[0] == '(') parse_result: {
-			const parens_unwrapped: []const u8 = a.unwrapParens(next.item);
+			const parens_unwrapped: []const u8 = unwrapParens(next.item);
+			std.debug.print("unwrapped\n", .{});
 			break :parse_result try parseGates(parens_unwrapped, ctx);
 		} else try parseCmp(next.item, ctx);
 
@@ -231,6 +224,7 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
+	std.debug.print("parseCmp '{s}'\n", .{expr});
 	const nextAdjusted = struct {
 		/// Instead of returning an item and the matched token, this function looks forward
 		/// and alters the upcoming string to determine the correct comparison operator.
@@ -278,7 +272,8 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
-			const parens_unwrapped: []const u8 = a.unwrapParens(expr);
+			std.debug.print("unwrapping\n", .{});
+			const parens_unwrapped: []const u8 = unwrapParens(expr);
 			// TODO TEST why are we using expr here instead of lhs_buf?
 			const lhs: bool = try parseGates(parens_unwrapped, ctx);
 			break :lhs @intFromBool(lhs);
@@ -291,7 +286,8 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
 		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
-				const parens_unwrapped: []const u8 = a.unwrapParens(slice);
+				std.debug.print("unwrapping\n", .{});
+				const parens_unwrapped: []const u8 = unwrapParens(slice);
 				const rhs_bool: bool = try parseGates(parens_unwrapped, ctx);
 				break :rhs @intFromBool(rhs_bool);
 			}
@@ -344,6 +340,35 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 		')' => return ValidateLiteralError.UnexpectedRparen,
 		else => continue
 	};
+}
+
+// TODO this function should errhandle the condition
+/// Called when first character in buffer is opening parenthesis.
+/// TODO NOW change this comment
+/// Returns index of corresponding closing parenthesis preceeding `self.expr`.
+/// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
+/// Does not log.
+fn findCloseParen(buf: []const u8) error{UnclosedParenthesis}!usize {
+	std.debug.print("findCloseParen '{s}'\n", .{buf});
+	var result: usize = 1;
+	var scope: usize = 1;
+	while (result < buf.len) : (result += 1) switch (buf[result]) {
+		'(' => scope += 1,
+		')' => {
+			scope -= 1;
+			if (scope == 0) return result;
+		},
+		else => continue
+	};
+	return error.UnclosedParenthesis;
+}
+
+/// Assumes that `input` is enclosed in parentheses.
+/// Returns slice of it with parens removed and whitespace of remainder trimmed.
+fn unwrapParens(buf: []const u8) []const u8 {
+	std.debug.print("unwrapParens '{s}'\n", .{buf});
+	const end: usize = findCloseParen(buf) catch unreachable;
+	return std.mem.trim(u8, buf[1..end], " \t");
 }
 
 // TODO NOW DEBUG .if false & (true | true)
