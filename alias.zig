@@ -16,9 +16,3 @@ pub fn trimWStart(buf: []const u8) []const u8 {
 pub fn trimWEnd(buf: []const u8) []const u8 {
 	return std.mem.trimEnd(u8, buf, " \t");
 }
-
-/// Assumes that `input` is enclosed in parentheses.
-/// Returns slice of it with parens removed and whitespace of remainder trimmed.
-pub fn unwrapParens(buf: []const u8) []const u8 {
-	return std.mem.trim(u8, buf[1..buf.len - 1], " \t");
-}

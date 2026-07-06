@@ -51,12 +51,8 @@ const ParseIterator = struct {
 		var i: usize = 0;
 		while (i < self.expr.len) : (i += 1) {
 			if (self.expr[i] == '(') {
-				std.debug.print("oops '{s}'\n", .{self.expr});
 				i += try findCloseParen(self.expr[i..]);
 				continue;
-				// // TODO NOW DEBUG this is the part
-				// defer self.expr = self.expr[i + 1..];
-				// return .{ .item = self.expr[0..i + 1], .matched = 0 };
 			}
 			if (std.mem.containsAtLeastScalar(u8, self.tokens, 1, self.expr[i])) {
 				defer self.expr = self.expr[i + 1..];
@@ -152,6 +148,7 @@ test parse {
 	try expTrue("true = true", &ctx);
 	try expTrue("true=true", &ctx);
 	try expTrue("(true = true)", &ctx);
+	try expTrue("(true = true) = (false = false)", &ctx);
 	try expTrue("(true = true) = (!false = !false)", &ctx);
 	try expTrue("(true = !false) = (!false = true)", &ctx);
 	try expTrue("!false", &ctx);
@@ -176,6 +173,7 @@ test parse {
 	try expTrue("ft < 43", &ctx);
 	try expTrue("ft <= 43", &ctx);
 	try expTrue("ft > true", &ctx);
+	try expTrue("(true > b) | (c & d)", &ctx);
 
 	try expFalse("false", &ctx);
 	try expFalse("(false)", &ctx);
@@ -195,10 +193,17 @@ test parse {
 	// TODO NOW DEBUG
 	try expError(DoubleEquals, "(a | b) == (c & d | (e + f))", &ctx);
 
+	const Empty = ParseError.Empty;
+	try expError(Empty, "", &ctx);
+	try expError(Empty, " ", &ctx);
+	try expError(Empty, "       ", &ctx);
+
 	try expError(ParseError.UnexpectedOperator, "true < = false", &ctx);
+	try expError(ParseError.UnexpectedExpression, "(a | b) = (c & d | (e + f))", &ctx);
 }
 
 fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
+	std.debug.print("\nparseGates '{s}'\n", .{expr});
 	// These variable could ofc also be false and '|', respectively.
 	var result = true;
 	var matched: u8 = '&';
@@ -208,7 +213,10 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 		std.debug.print("parseGates/next '{s}'\n", .{next.item});
 		const parse_result: bool = if (next.item[0] == '(') parse_result: {
 			const parens_unwrapped: []const u8 = unwrapParens(next.item);
-			std.debug.print("unwrapped\n", .{});
+			// TODO NOW DEBUG this shouldnt return because we have other items left
+			// TODO NOW NOTE only use unwrapParens in termValue
+			// instead, we should just merge this with the next slices
+			// e.g. by saving the start index as ?usize
 			break :parse_result try parseGates(parens_unwrapped, ctx);
 		} else try parseCmp(next.item, ctx);
 
@@ -226,19 +234,19 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	std.debug.print("parseCmp '{s}'\n", .{expr});
 	const nextAdjusted = struct {
-		/// Instead of returning an item and the matched token, this function looks forward
-		/// and alters the upcoming string to determine the correct comparison operator.
-		fn f(it: *ParseIterator)
-		NextAdjustedError!struct {[]const u8, ?CompareOperator} {
+		/// Instead of returning an item and the matched token, this function looks
+		/// forward and alters the upcoming string to determine the correct comparison
+		/// operator.
+		fn f(it: *ParseIterator) NextAdjustedError!struct {[]const u8, ?CompareOperator} {
 			const next: ParseIterator.Next = (try it.next()).?;
-			var buf: []const u8 = next.item;
-			if (buf.len == 0) return NextAdjustedError.UnexpectedOperator;
-			if (next.matched == 0) return .{buf, null};
+			if (next.item.len == 0) return NextAdjustedError.UnexpectedOperator;
+			// If the entire slice was returned, pass it forth.
+			if (next.matched == 0) return .{next.item, null};
 
-			if (buf[buf.len - 1] == '!') switch (next.matched) {
+			if (next.item[next.item.len - 1] == '!') switch (next.matched) {
 				'<', '>' => return NextAdjustedError.UnexpectedBangOperator,
 				'=' => {
-					buf = buf[0..buf.len - 1];
+					const buf = next.item[0..next.item.len - 1];
 					return .{buf, .neq};
 				},
 				else => unreachable
@@ -247,20 +255,20 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 				'<' => {
 					if (it.expr[0] == '=') {
 						it.expr = it.expr[1..];
-						return .{buf, .lte};
+						return .{next.item, .lte};
 					}
-					return .{buf, .lt};
+					return .{next.item, .lt};
 				},
 				'>' => {
 					if (it.expr[0] == '=') {
 						it.expr = it.expr[1..];
-						return .{buf, .gte};
+						return .{next.item, .gte};
 					}
-					return .{buf, .gt};
+					return .{next.item, .gt};
 				},
 				'=' => {
 					if (it.expr[0] == '=') return NextAdjustedError.DoubleEquals;
-					return .{buf, .eq};
+					return .{next.item, .eq};
 				},
 				else => unreachable
 			}
@@ -270,6 +278,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var it = ParseIterator.init(expr, "<>=");
 
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
+	std.debug.print("parseCmp/next: '{s}'/{s}\n", .{lhs_buf, @tagName(maybe_cmp orelse .neq)});
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
 			std.debug.print("unwrapping\n", .{});
@@ -284,6 +293,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 	while (true) {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
+		std.debug.print("parseCmp/next: '{s}'/{s}\n", .{slice, @tagName(new_cmp orelse .neq)});
 		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
 				std.debug.print("unwrapping\n", .{});
@@ -349,6 +359,7 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 /// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
 /// Does not log.
 fn findCloseParen(buf: []const u8) error{UnclosedParenthesis}!usize {
+	std.debug.assert(buf[0] == '(');
 	std.debug.print("findCloseParen '{s}'\n", .{buf});
 	var result: usize = 1;
 	var scope: usize = 1;
@@ -370,8 +381,6 @@ fn unwrapParens(buf: []const u8) []const u8 {
 	const end: usize = findCloseParen(buf) catch unreachable;
 	return std.mem.trim(u8, buf[1..end], " \t");
 }
-
-// TODO NOW DEBUG .if false & (true | true)
 
 // TODO TEST
 // a < b < c
