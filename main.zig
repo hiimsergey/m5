@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.12   GPL-3.0 license
+	\\v0.4.0   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\

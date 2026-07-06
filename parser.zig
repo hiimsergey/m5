@@ -81,7 +81,7 @@ const ParseState = enum(u8) {
 /// into consideration.
 /// Logs on error.
 pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bool {
-	return parseGates(expr, ctx) catch |e| {
+	const value: MacroInt = parseGates(expr, ctx) catch |e| {
 		switch (e) {
 			ParseError.DoubleEquals =>
 				log.errWithLineNr(linenr, "Don't use '=='! Use '=' instead!", .{}),
@@ -109,6 +109,7 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 		}
 		return e;
 	};
+	return value != 0;
 }
 
 test parse {
@@ -136,7 +137,8 @@ test parse {
 	try ctx.macros.put("true", 1);
 	try ctx.macros.put("ft", 42);
 
-	try expTrue("1", &ctx); // TODO REMOVE
+	try expTrue("1", &ctx);
+	try expTrue("!0", &ctx);
 	try expTrue("true", &ctx);
 	try expTrue("(  true )", &ctx);
 	try expTrue("(((true)))", &ctx);
@@ -172,8 +174,12 @@ test parse {
 	try expTrue("ft <= 43", &ctx);
 	try expTrue("ft > true", &ctx);
 	try expTrue("(true > b) | (c & d)", &ctx);
+	try expTrue("(27) != (1)", &ctx);
+	try expTrue("(27) > (1)", &ctx);
 
 	try expFalse("0", &ctx);
+	try expFalse("!1", &ctx);
+	try expFalse("!ft", &ctx);
 	try expFalse("false", &ctx);
 	try expFalse("(false)", &ctx);
 	try expFalse("false | false", &ctx);
@@ -201,21 +207,21 @@ test parse {
 	try expError(ParseError.Empty, "(  )", &ctx);
 }
 
-fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
-	// TODO CONSIDER
+fn parseGates(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 	if (a.trimW(expr).len == 0) return ParseError.Empty;
 	std.debug.print("\nparseGates '{s}'\n", .{expr});
-	// These variable could ofc also be false and '|', respectively.
-	var result = true;
-	var matched: u8 = '&';
-
 	var it = ParseIterator.init(expr, "&|");
+	var result: MacroInt, var matched: u8 = result: {
+		const next: ParseIterator.Next = (try it.next()).?;
+		break :result .{try parseCmp(next.item, ctx), next.matched};
+	};
+
 	while (try it.next()) |next| {
-		std.debug.print("parseGates/next '{s}'\n", .{next.item});
-		const parse_result: bool = try parseCmp(next.item, ctx);
+		std.debug.print("parseGates/next '{s}' ({c})\n", .{next.item, matched});
+		const parse_result: MacroInt = try parseCmp(next.item, ctx);
 		result = switch (matched) {
-			'&' => result and parse_result,
-			'|' => result or parse_result,
+			'&' => @intFromBool((result != 0) and (parse_result != 0)),
+			'|' => @intFromBool((result != 0) or (parse_result != 0)),
 			else => unreachable
 		};
 		matched = next.matched;
@@ -224,7 +230,7 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 }
 
 // TODO FINAL document the cmp behavior (like a<b<c)
-fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
+fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 	std.debug.print("parseCmp '{s}'\n", .{expr});
 	const nextAdjusted = struct{
 		/// Instead of returning an item and the matched token, this function looks
@@ -271,54 +277,39 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var it = ParseIterator.init(expr, "<>=");
 
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
-	std.debug.print("parseCmp/next: '{s}'/{s}\n", .{lhs_buf, @tagName(maybe_cmp orelse .neq)});
-	// TODO NOW CONSIDER
-	var lhs: MacroInt = lhs: {
-		if (lhs_buf[0] == '(') {
-			std.debug.print("unwrapping\n", .{});
-			const parens_unwrapped: []const u8 = unwrapParens(expr);
-			// TODO TEST why are we using expr here instead of lhs_buf?
-			const lhs: bool = try parseGates(parens_unwrapped, ctx);
-			break :lhs @intFromBool(lhs);
-		}
-		break :lhs try termValue(lhs_buf, ctx);
-	};
-	var cmp: CompareOperator = maybe_cmp orelse return lhs > 0;
+	var lhs: MacroInt = try termValue(lhs_buf, ctx);
+	var cmp: CompareOperator = maybe_cmp orelse return lhs;
 
 	while (true) {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
-		std.debug.print("parseCmp/next: '{s}'/{s}\n", .{slice, @tagName(new_cmp orelse .neq)});
-		// TODO NOW CONSIDER
-		const rhs: MacroInt = rhs: {
-			if (slice[0] == '(') {
-				std.debug.print("unwrapping\n", .{});
-				const parens_unwrapped: []const u8 = unwrapParens(slice);
-				const rhs_bool: bool = try parseGates(parens_unwrapped, ctx);
-				break :rhs @intFromBool(rhs_bool);
-			}
-			break :rhs try termValue(slice, ctx);
-		};
+		const rhs: MacroInt = try termValue(slice, ctx);
 		switch (cmp) {
-			.lt => if (lhs >= rhs) return false,
-			.lte => if (lhs > rhs) return false,
-			.eq => if (lhs != rhs) return false,
-			.gt => if (lhs <= rhs) return false,
-			.gte => if (lhs < rhs) return false,
-			.neq => if (lhs == rhs) return false
+			.lt => if (lhs >= rhs) return 0,
+			.lte => if (lhs > rhs) return 0,
+			.eq => if (lhs != rhs) return 0,
+			.gt => if (lhs <= rhs) return 0,
+			.gte => if (lhs < rhs) return 0,
+			.neq => if (lhs == rhs) return 0
 		}
 
 		cmp = new_cmp orelse break;
 		lhs = rhs;
 	}
 
-	return true;
+	return 1;
 }
 
 /// TODO COMMENT
-fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
+fn termValue(term: []const u8, ctx: *const Context) ParseError!MacroInt {
+	// TODO can term be something like " (foo) "? ie untrimmd
 	// TODO CONSIDER check for illegal characters
 	// there's a reason not to, cause maybe validateKey used to do the job at the
 	// start
+
+	if (term[0] == '(') {
+		const parens_unwrapped: []const u8 = unwrapParens(term);
+		return try parseGates(parens_unwrapped, ctx);
+	}
 
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
@@ -349,15 +340,11 @@ fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 	};
 }
 
-// TODO this function should errhandle the condition
-/// Called when first character in buffer is opening parenthesis.
-/// TODO NOW change this comment
-/// Returns index of corresponding closing parenthesis preceeding `self.expr`.
+/// Returns index of corresponding closing parenthesis to the first opening one.
 /// Returns `error.UnclosedParenthesis` if there is no closing parenthesis.
 /// Does not log.
 fn findCloseParen(buf: []const u8) error{UnclosedParenthesis}!usize {
 	std.debug.assert(buf[0] == '(');
-	std.debug.print("findCloseParen '{s}'\n", .{buf});
 	var result: usize = 1;
 	var scope: usize = 1;
 	while (result < buf.len) : (result += 1) switch (buf[result]) {

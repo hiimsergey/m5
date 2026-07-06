@@ -150,8 +150,6 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 				}
 			},
 			.end => {
-				// TODO FINAL COMMENT that users are free to type anything after 'end'
-
 				// TODO NOW NOW TEST nested ifs
 				if (scope == 0) {
 					log.errWithLineNr(
