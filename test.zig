@@ -38,7 +38,7 @@ fn setTestFile(content: []const u8) !void {
 	try test_file_writer.interface.flush();
 }
 
-const Command = struct {
+const Command = struct{
 	child: std.process.Child,
 	term: std.process.Child.Term,
 	stdout: std.ArrayList(u8),

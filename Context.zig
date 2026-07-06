@@ -36,7 +36,7 @@ const WriteState = enum(u8) {
 
 const keyword_map = std.StaticStringMap(Keyword).initComptime(kvs: {
 	const fields = @typeInfo(Keyword).@"enum".fields;
-	var result: [fields.len]struct { []const u8, Keyword } = undefined;
+	var result: [fields.len]struct{ []const u8, Keyword } = undefined;
 	for (fields, 0..) |field, i|
 		result[i] = .{ field.name, @as(Keyword, @enumFromInt(field.value)) };
 	break :kvs result;
@@ -108,15 +108,10 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 				scope += 1;
 				switch (state) {
 					.write => {
-						const expression = a.trimWEnd(cmd[it.index..]);
-						if (expression.len == 0) {
-							log.errWithLineNr(linenr,
-								"'if' clause expects expression!", .{});
-							return error.User;
-						}
-
+						// TODO CONSIDER
+						const expr = a.trimWEnd(cmd[it.index..]);
 						const parse_result: bool =
-							parser.parse(expression, linenr, self) catch
+							parser.parse(expr, linenr, self) catch
 							return error.User;
 						if (parse_result) continue;
 						state = .dont_write;
@@ -139,15 +134,15 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 							return error.User;
 						}
 
-						const expression = a.trimWEnd(cmd[it.index..]);
-						if (expression.len == 0) {
+						const expr = a.trimWEnd(cmd[it.index..]);
+						if (expr.len == 0) {
 							log.errWithLineNr(linenr,
 								"'else if' clause expects expression!", .{});
 							return error.User;
 						}
 
 						const parse_result: bool =
-							parser.parse(expression, linenr, self) catch
+							parser.parse(expr, linenr, self) catch
 							return error.User;
 						state = if (parse_result) .write else .dont_write;
 					},

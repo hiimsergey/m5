@@ -25,8 +25,8 @@ const TermValueError = error{
 } || ValidateLiteralError;
 const ParseError = NextAdjustedError || TermValueError;
 
-const ParseIterator = struct {
-	const Next = struct {
+const ParseIterator = struct{
+	const Next = struct{
 		item: []const u8,
 		matched: u8
 	};
@@ -81,8 +81,6 @@ const ParseState = enum(u8) {
 /// into consideration.
 /// Logs on error.
 pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bool {
-	std.debug.assert(expr.len > 0);
-
 	return parseGates(expr, ctx) catch |e| {
 		switch (e) {
 			ParseError.DoubleEquals =>
@@ -114,17 +112,17 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 }
 
 test parse {
-	const expTrue = struct {
+	const expTrue = struct{
 		fn f(expr: []const u8, ctx: *const Context) !void {
 			return try std.testing.expectEqual(true, parse(expr, 1, ctx));
 		}
 	}.f;
-	const expFalse = struct {
+	const expFalse = struct{
 		fn f(expr: []const u8, ctx: *const Context) !void {
 			return try std.testing.expectEqual(false, parse(expr, 1, ctx));
 		}
 	}.f;
-	const expError = struct {
+	const expError = struct{
 		fn f(e: ParseError, expr: []const u8, ctx: *const Context) !void {
 			return try std.testing.expectError(e, parse(expr, 1, ctx));
 		}
@@ -138,7 +136,7 @@ test parse {
 	try ctx.macros.put("true", 1);
 	try ctx.macros.put("ft", 42);
 
-	// TODO
+	try expTrue("1", &ctx); // TODO REMOVE
 	try expTrue("true", &ctx);
 	try expTrue("(  true )", &ctx);
 	try expTrue("(((true)))", &ctx);
@@ -175,6 +173,7 @@ test parse {
 	try expTrue("ft > true", &ctx);
 	try expTrue("(true > b) | (c & d)", &ctx);
 
+	try expFalse("0", &ctx);
 	try expFalse("false", &ctx);
 	try expFalse("(false)", &ctx);
 	try expFalse("false | false", &ctx);
@@ -190,7 +189,6 @@ test parse {
 	try expError(DoubleEquals, "a ==b", &ctx);
 	try expError(DoubleEquals, "a== b", &ctx);
 	try expError(DoubleEquals, "a   ==       b", &ctx);
-	// TODO NOW DEBUG
 	try expError(DoubleEquals, "(a | b) == (c & d | (e + f))", &ctx);
 
 	const Empty = ParseError.Empty;
@@ -200,9 +198,12 @@ test parse {
 
 	try expError(ParseError.UnexpectedOperator, "true < = false", &ctx);
 	try expError(ParseError.UnexpectedExpression, "(a | b) = (c & d | (e + f))", &ctx);
+	try expError(ParseError.Empty, "(  )", &ctx);
 }
 
 fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
+	// TODO CONSIDER
+	if (a.trimW(expr).len == 0) return ParseError.Empty;
 	std.debug.print("\nparseGates '{s}'\n", .{expr});
 	// These variable could ofc also be false and '|', respectively.
 	var result = true;
@@ -211,15 +212,7 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 	var it = ParseIterator.init(expr, "&|");
 	while (try it.next()) |next| {
 		std.debug.print("parseGates/next '{s}'\n", .{next.item});
-		const parse_result: bool = if (next.item[0] == '(') parse_result: {
-			const parens_unwrapped: []const u8 = unwrapParens(next.item);
-			// TODO NOW DEBUG this shouldnt return because we have other items left
-			// TODO NOW NOTE only use unwrapParens in termValue
-			// instead, we should just merge this with the next slices
-			// e.g. by saving the start index as ?usize
-			break :parse_result try parseGates(parens_unwrapped, ctx);
-		} else try parseCmp(next.item, ctx);
-
+		const parse_result: bool = try parseCmp(next.item, ctx);
 		result = switch (matched) {
 			'&' => result and parse_result,
 			'|' => result or parse_result,
@@ -233,11 +226,11 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!bool {
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	std.debug.print("parseCmp '{s}'\n", .{expr});
-	const nextAdjusted = struct {
+	const nextAdjusted = struct{
 		/// Instead of returning an item and the matched token, this function looks
 		/// forward and alters the upcoming string to determine the correct comparison
 		/// operator.
-		fn f(it: *ParseIterator) NextAdjustedError!struct {[]const u8, ?CompareOperator} {
+		fn f(it: *ParseIterator) NextAdjustedError!struct{[]const u8, ?CompareOperator} {
 			const next: ParseIterator.Next = (try it.next()).?;
 			if (next.item.len == 0) return NextAdjustedError.UnexpectedOperator;
 			// If the entire slice was returned, pass it forth.
@@ -279,6 +272,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
 	std.debug.print("parseCmp/next: '{s}'/{s}\n", .{lhs_buf, @tagName(maybe_cmp orelse .neq)});
+	// TODO NOW CONSIDER
 	var lhs: MacroInt = lhs: {
 		if (lhs_buf[0] == '(') {
 			std.debug.print("unwrapping\n", .{});
@@ -294,6 +288,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	while (true) {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
 		std.debug.print("parseCmp/next: '{s}'/{s}\n", .{slice, @tagName(new_cmp orelse .neq)});
+		// TODO NOW CONSIDER
 		const rhs: MacroInt = rhs: {
 			if (slice[0] == '(') {
 				std.debug.print("unwrapping\n", .{});
@@ -309,7 +304,7 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 			.eq => if (lhs != rhs) return false,
 			.gt => if (lhs <= rhs) return false,
 			.gte => if (lhs < rhs) return false,
-			.neq => if (lhs == rhs) return false,
+			.neq => if (lhs == rhs) return false
 		}
 
 		cmp = new_cmp orelse break;
@@ -319,8 +314,9 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!bool {
 	return true;
 }
 
+/// TODO COMMENT
 fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
-	// TODO NOW CONSIDER check for illegal characters
+	// TODO CONSIDER check for illegal characters
 	// there's a reason not to, cause maybe validateKey used to do the job at the
 	// start
 
@@ -333,8 +329,8 @@ fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 		try validateLiteral(literal);
 
 		break :value ctx.macros.get(literal) orelse {
-			if (!ctx.safe) break :value 0;
-			return TermValueError.UndefinedMacro;
+			if (ctx.safe) return TermValueError.UndefinedMacro;
+			break :value 0;
 		};
 	};
 
@@ -342,6 +338,7 @@ fn termValue(term: []const u8, ctx: *const Context) TermValueError!MacroInt {
 	return value;
 }
 
+// TODO FINAL CONSIDER might become obsolete
 /// Returns an error if iterator item contains syntax error.
 fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
 	if (buf.len == 0) return ValidateLiteralError.Empty;

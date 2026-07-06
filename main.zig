@@ -11,7 +11,7 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.3.11   GPL-3.0 license
+	\\v0.3.12   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
@@ -42,7 +42,7 @@ pub fn main(init: Init) u8 {
 	return 0;
 }
 
-pub const validateKey = struct {
+pub const validateKey = struct{
 	const banned_chars = "=+-*/&|!<>() \t";
 
 	/// Returns an error and logs if `buf` can't be a valid key.
@@ -168,7 +168,7 @@ fn logOpenError(e: OpenError, arg: []const u8) void {
 }
 
 /// Logs on error.
-fn readDefinition(flag: []const u8) error{User}!struct {[]const u8, MacroInt} {
+fn readDefinition(flag: []const u8) error{User}!struct{[]const u8, MacroInt} {
 	const definition = flag["-d:".len..];
 
 	const key_cand: []const u8, const value: MacroInt = kv: {
