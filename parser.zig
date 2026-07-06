@@ -283,14 +283,15 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 	while (true) {
 		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
 		const rhs: MacroInt = try termValue(slice, ctx);
-		switch (cmp) {
-			.lt => if (lhs >= rhs) return 0,
-			.lte => if (lhs > rhs) return 0,
-			.eq => if (lhs != rhs) return 0,
-			.gt => if (lhs <= rhs) return 0,
-			.gte => if (lhs < rhs) return 0,
-			.neq => if (lhs == rhs) return 0
-		}
+		const holds: bool = switch (cmp) {
+			.lt => lhs < rhs,
+			.lte => lhs <= rhs,
+			.eq => lhs == rhs,
+			.gt => lhs > rhs,
+			.gte => lhs >= rhs,
+			.neq => lhs != rhs
+		};
+		if (!holds) return 0;
 
 		cmp = new_cmp orelse break;
 		lhs = rhs;
