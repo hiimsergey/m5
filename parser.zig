@@ -138,19 +138,17 @@ test parse {
 	try ctx.macros.put("ft", 42);
 
 	try expTrue("1", &ctx);
+	try expTrue("42", &ctx);
 	try expTrue("!0", &ctx);
 	try expTrue("true", &ctx);
 	try expTrue("(  true )", &ctx);
 	try expTrue("(((true)))", &ctx);
 	try expTrue("( ( true ) )", &ctx);
+	try expTrue("( 27 )", &ctx);
 	try expTrue("true & true", &ctx);
 	try expTrue("true&true", &ctx);
 	try expTrue("true = true", &ctx);
 	try expTrue("true=true", &ctx);
-	try expTrue("(true = true)", &ctx);
-	try expTrue("(true = true) = (false = false)", &ctx);
-	try expTrue("(true = true) = (!false = !false)", &ctx);
-	try expTrue("(true = !false) = (!false = true)", &ctx);
 	try expTrue("!false", &ctx);
 	try expTrue("true | true", &ctx);
 	try expTrue("true | false", &ctx);
@@ -173,19 +171,28 @@ test parse {
 	try expTrue("ft < 43", &ctx);
 	try expTrue("ft <= 43", &ctx);
 	try expTrue("ft > true", &ctx);
-	try expTrue("(true > b) | (c & d)", &ctx);
 	try expTrue("(27) != (1)", &ctx);
 	try expTrue("(27) > (1)", &ctx);
+	try expTrue("1 < 2 < 3", &ctx);
+	try expTrue("(true = true)", &ctx);
+	try expTrue("(true = true) = (false = false)", &ctx);
+	try expTrue("(true = true) = (!false = !false)", &ctx);
+	try expTrue("(true = !false) = (!false = true)", &ctx);
+	try expTrue("(true | false) = 1", &ctx);
+	try expTrue("(true > b) | (c & d)", &ctx);
 
 	try expFalse("0", &ctx);
 	try expFalse("!1", &ctx);
 	try expFalse("!ft", &ctx);
 	try expFalse("false", &ctx);
 	try expFalse("(false)", &ctx);
+	try expFalse("( 0 )", &ctx);
+	try expFalse("( false )", &ctx);
 	try expFalse("false | false", &ctx);
 	try expFalse("false & false", &ctx);
 	try expFalse("false < false", &ctx);
 	try expFalse("false > false", &ctx);
+	try expFalse("1 < 3 < 2", &ctx);
 	try expFalse("false | false & false", &ctx);
 	try expFalse("false & (true | true)", &ctx);
 
@@ -196,6 +203,15 @@ test parse {
 	try expError(DoubleEquals, "a== b", &ctx);
 	try expError(DoubleEquals, "a   ==       b", &ctx);
 	try expError(DoubleEquals, "(a | b) == (c & d | (e + f))", &ctx);
+
+	const UnclosedParenthesis = ParseError.UnclosedParenthesis;
+	try expError(UnclosedParenthesis, "(a", &ctx);
+	try expError(UnclosedParenthesis, "(ft != true", &ctx);
+	try expError(UnclosedParenthesis, "(1 = true) = false)", &ctx);
+	try expError(UnclosedParenthesis, "(((true))", &ctx);
+
+	const UnexpectedBangOperator = ParseError.UnexpectedBangOperator;
+	try exprError
 
 	const Empty = ParseError.Empty;
 	try expError(Empty, "", &ctx);
@@ -302,11 +318,6 @@ fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 
 /// TODO COMMENT
 fn termValue(term: []const u8, ctx: *const Context) ParseError!MacroInt {
-	// TODO can term be something like " (foo) "? ie untrimmd
-	// TODO CONSIDER check for illegal characters
-	// there's a reason not to, cause maybe validateKey used to do the job at the
-	// start
-
 	if (term[0] == '(') {
 		const parens_unwrapped: []const u8 = unwrapParens(term);
 		return try parseGates(parens_unwrapped, ctx);
@@ -314,13 +325,13 @@ fn termValue(term: []const u8, ctx: *const Context) ParseError!MacroInt {
 
 	const trim_nots = std.mem.trimStart(u8, term, "!");
 	const negate: bool = (term.len - trim_nots.len) & 1 == 1;
-	const literal = std.mem.trim(u8, trim_nots, " \t");
+	const lit = std.mem.trim(u8, trim_nots, " \t");
 
-	const value: MacroInt = std.fmt.parseInt(MacroInt, literal, 10) catch |e| value: {
+	const value: MacroInt = std.fmt.parseInt(MacroInt, lit, 10) catch |e| value: {
 		if (e == error.Overflow) return TermValueError.UnrepresentableNumber;
-		try validateLiteral(literal);
+		try validateLiteral(lit);
 
-		break :value ctx.macros.get(literal) orelse {
+		break :value ctx.macros.get(lit) orelse {
 			if (ctx.safe) return TermValueError.UndefinedMacro;
 			break :value 0;
 		};
@@ -330,10 +341,9 @@ fn termValue(term: []const u8, ctx: *const Context) ParseError!MacroInt {
 	return value;
 }
 
-// TODO FINAL CONSIDER might become obsolete
-/// Returns an error if iterator item contains syntax error.
+/// Returns an error if supposed literal contains syntax error.
 fn validateLiteral(buf: []const u8) ValidateLiteralError!void {
-	if (buf.len == 0) return ValidateLiteralError.Empty;
+	std.debug.assert(buf.len > 0);
 	for (buf) |c| switch (c) {
 		' ', '(' => return ValidateLiteralError.UnexpectedExpression,
 		')' => return ValidateLiteralError.UnexpectedRparen,
@@ -370,6 +380,7 @@ fn unwrapParens(buf: []const u8) []const u8 {
 // TODO TEST
 // a < b < c
 // a<b<c
+// TEST all ParseErrors
 
 // TODO TEST invalid
 // a &
