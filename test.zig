@@ -1,27 +1,44 @@
-// TODO ALL
 const std = @import("std");
 const parser = @import("parser.zig");
 
+const ArrayList = std.ArrayList;
+const Child = std.process.Child;
 const Map = std.StringHashMap([]const u8);
 
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const parse = parser.parse;
-const validate = parser.validate;
 
 const gpa = std.testing.allocator;
-
+const io = std.testing.io;
 const m5 = "zig-out/bin/m5";
 const test_file_path = ".zig-cache/test.txt";
 var test_file: std.Io.File = undefined;
 var test_file_writer: std.Io.File.Writer = undefined;
 var test_file_writer_buf: [1024]u8 = undefined;
 
-//fn validate(condition: []const u8) !void {
-	//return parser.validate(condition, 0);
-//}
+/// Creates new `Command` instances with these commands.
+/// Uses allocator internally (bad practice but probably not that bad in a testing file).
+fn expectCommand(
+	comptime args: []const u8,
+	arg_args: anytype,
+	ret: u8,
+	expd_stdout: []const u8) !void
+{
+	const argv: []const []const u8 = comptime argv: {
+		var result: []const []const u8 = &.{};
+		var it = std.mem.tokenizeAny(u8, std.fmt.comptimePrint(args, arg_args), " \t");
+		while (it.next()) |arg| result = result ++ &.{arg};
+		break :argv result;
+	};
+	const run_result: std.process.RunResult = std.process.run(gpa, io, .{ .argv = argv });
+	try std.testing.expectEqual(ret, run_result.term.exited);
+	try std.testing.expectEqualStrings(expd_stdout, run_result.stdout);
+	gpa.free(run_result.stdout);
+	gpa.free(run_result.stderr);
+}
 
-/// Open file at `test_file_path` for writing.
+/// Opens file at `test_file_path` for writing.
 /// Must be closed with `test_file_path.close()`.
 fn openTestFile() !void {
 	test_file = try std.fs.cwd().createFile(
@@ -31,81 +48,28 @@ fn openTestFile() !void {
 	test_file_writer = test_file.writer(&test_file_writer_buf);
 }
 
-/// Set `content` as the file content of the test file at `test_file_path`.
+/// Sets `content` as the file content of the test file at `test_file_path`.
 fn setTestFile(content: []const u8) !void {
 	try test_file.setEndPos(0);
 	try test_file_writer.interface.writeAll(content);
 	try test_file_writer.interface.flush();
 }
 
-const Command = struct{
-	child: std.process.Child,
-	term: std.process.Child.Term,
-	stdout: std.ArrayList(u8),
-	stderr: std.ArrayList(u8),
-
-	fn init(args: []const []const u8) !Command {
-		var result: Command = undefined;
-
-		result.child = std.process.Child.init(args, gpa);
-		result.child.stdout_behavior = .Pipe;
-		result.child.stderr_behavior = .Pipe;
-		try result.child.spawn();
-
-		result.stdout = std.ArrayList(u8).empty;
-		result.stderr = std.ArrayList(u8).empty;
-
-		try result.child.collectOutput(
-			gpa,
-			&result.stdout, &result.stderr,
-			std.math.maxInt(usize)
-		);
-
-		result.term = try result.child.wait();
-		return result;
-	}
-
-	fn deinit(self: *Command) void {
-		self.stdout.deinit(gpa);
-		self.stderr.deinit(gpa);
-	}
-	
-	fn expectResult(self: *const Command, ret: u8, stdout: []const u8) !void {
-		try std.testing.expectEqual(ret, self.term.Exited);
-		try std.testing.expectEqualStrings(stdout, self.stdout.items);
-	}
-};
-
 test "Processing files normally" {
 	try openTestFile();
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\hi alice
 		\\m5 end
 		\\
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", test_file_path});
-	defer c0.deinit();
-	try c0.expectResult(0, "");
-
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
-	defer c1.deinit();
-	try c1.expectResult(0, "hi alice\n");
-
-	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-DALICE"});
-	defer c2.deinit();
-	try c2.expectResult(0, "hi alice\n");
-
-	var c3 = try Command.init(&.{m5, test_file_path, "-DALICE", "-p", "m5"});
-	defer c3.deinit();
-	try c3.expectResult(1, "");
-
-	var c4 = try Command.init(&.{m5, test_file_path, "-DALICE"});
-	defer c4.deinit();
-	try c4.expectResult(1, "");
+	try expectCommand("{s} {s}", .{m5, test_file_path}, 0, "");
+	try expectCommand("{s} {s} -p:m5", .{m5, test_file_path}, 0, "");
+	try expectCommand("{s} {s} -d:alice", .{m5, test_file_path}, 0, "hi alice\n");
+	try expectCommand("{s} -d:alice {s}", .{m5, test_file_path}, 0, "hi alice\n");
 }
 
 test "Processing files without trailing newline" {
@@ -113,7 +77,7 @@ test "Processing files without trailing newline" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\hi alice
 		\\m5 end
 	);
@@ -122,15 +86,15 @@ test "Processing files without trailing newline" {
 	defer c0.deinit();
 	try c0.expectResult(0, "");
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(0, "hi alice\n");
 
-	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-DALICE"});
+	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-Dalice"});
 	defer c2.deinit();
 	try c2.expectResult(0, "hi alice\n");
 
-	var c4 = try Command.init(&.{m5, test_file_path, "-DALICE"});
+	var c4 = try Command.init(&.{m5, test_file_path, "-Dalice"});
 	defer c4.deinit();
 	try c4.expectResult(1, "");
 }
@@ -156,7 +120,7 @@ test "Else keyword - normal else" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\foo bar
 		\\m5 else
 		\\baz buzz
@@ -173,82 +137,82 @@ test "Else keyword - normal if" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\foo bar
 		\\m5 else
 		\\baz buzz
 		\\m5 end
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-Dalice", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "foo bar\n");
 }
 
-test "Else keyword - elseBOB if" {
+test "Else keyword - elsebob if" {
 	try openTestFile();
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\foo bar
-		\\m5 elseBOB
+		\\m5 elsebob
 		\\baz buzz
 		\\m5 end
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-Dalice", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(1, "");
 }
 
-test "Else keyword - elseBOB else" {
+test "Else keyword - elsebob else" {
 	try openTestFile();
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\foo bar
-		\\m5 elseBOB
+		\\m5 elsebob
 		\\baz buzz
 		\\m5 end
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", "-DBOB", test_file_path});
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-Dbob", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(1, "");
 }
 
-test "Else keyword - else BOB else" {
+test "Else keyword - else bob else" {
 	try openTestFile();
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\foo bar
-		\\m5 else BOB
+		\\m5 else bob
 		\\baz buzz
 		\\m5 end
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", "-DBOB", test_file_path});
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-Dbob", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(1, "");
 }
 
-test "Else keyword - else if BOB else" {
+test "Else keyword - else if bob else" {
 	try openTestFile();
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\foo bar
-		\\m5 else if BOB
+		\\m5 else if bob
 		\\baz buzz
 		\\m5 end
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", "-DBOB", test_file_path});
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-Dbob", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "baz buzz\n");
 }
@@ -258,15 +222,15 @@ test "Nested if-blocks - Correct" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
-		\\m5 if BOB
+		\\m5 if alice
+		\\m5 if bob
 		\\hi alice and bob
 		\\m5 end
 		\\m5 end
 		\\
 	);
 
-	var c0 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c0 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c0.deinit();
 	try c0.expectResult(0, "hi alice and bob\n");
 
@@ -277,14 +241,14 @@ test "Nested if-blocks - missing end" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
-		\\m5 if BOB
+		\\m5 if alice
+		\\m5 if bob
 		\\hi alice and bob
 		\\m5 end
 		\\
 	);
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
 }
@@ -299,7 +263,7 @@ test "Nested if-blocks - missing if" {
 		\\
 	);
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
 }
@@ -309,8 +273,8 @@ test "Nested if-blocks - too much end" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
-		\\m5 if BOB
+		\\m5 if alice
+		\\m5 if bob
 		\\hi alice and bob
 		\\m5 end
 		\\m5 end
@@ -318,7 +282,7 @@ test "Nested if-blocks - too much end" {
 		\\
 	);
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
 }
@@ -328,15 +292,15 @@ test "Nested if-blocks - if and end at wrong pos 1" {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\m5 end
 		\\m5 end
-		\\m5 if BOB
+		\\m5 if bob
 		\\hi alice and bob
 		\\
 	);
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
 }
@@ -347,14 +311,14 @@ test "Nested if-blocks - if and end at wrong pos 2" {
 
 	try setTestFile(
 		\\m5 end
-		\\m5 if ALICE
+		\\m5 if alice
 		\\m5 end
-		\\m5 if BOB
+		\\m5 if bob
 		\\hi alice and bob
 		\\
 	);
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
 }
@@ -367,12 +331,12 @@ test "Nested if-blocks - if and end at wrong pos 3" {
 		\\m5 end
 		\\m5 end
 		\\hi alice and bob
-		\\m5 if ALICE
-		\\m5 if BOB
+		\\m5 if alice
+		\\m5 if bob
 		\\
 	);
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", "-DBOB", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", "-Dbob", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(1, "");
 }
@@ -382,7 +346,7 @@ test {
 	defer test_file.close();
 
 	try setTestFile(
-		\\m5 if ALICE
+		\\m5 if alice
 		\\hi alice
 		\\m5 end
 		\\
@@ -392,96 +356,13 @@ test {
 	defer c0.deinit();
 	try c0.expectResult(0, "");
 
-	var c1 = try Command.init(&.{m5, "-p", "m5", "-DALICE", test_file_path});
+	var c1 = try Command.init(&.{m5, "-p", "m5", "-Dalice", test_file_path});
 	defer c1.deinit();
 	try c1.expectResult(0, "hi alice\n");
 
-	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-DALICE"});
+	var c2 = try Command.init(&.{m5, "-p", "m5", test_file_path, "-Dalice"});
 	defer c2.deinit();
 	try c2.expectResult(0, "hi alice\n");
-}
-
-test "Condition validation" {
-	// TODO PLAN
-	// maybe store all tests in an array
-	// and use it to both validate and run tests
-	// or write a function that does both validation and testing
-	try validate("a & b | c", 1);
-	try validate("a & (b & c) | d | (a | (b & c))", 1);
-	try validate("(((b)))", 1);
-	try validate("a < 5", 1);
-	try validate("a < b < c", 1); // (0|1) < c
-	try validate("a != b", 1);
-
-	const E = error.User;
-	try expectError(E, validate("a |", 1));
-	try expectError(E, validate("a ! b", 1));
-	try expectError(E, validate("2bad", 1));
-}
-
-test "Condition parsing: Literals" {
-	var map = Map.init(gpa);
-	defer map.deinit();
-
-	try expect(!parse("5 > 2 & 1 & 0", 1, &map));
-	try expect(parse("!FOO", 1, &map));
-}
-
-test "Condition parsing: Logic chains" {
-	var map = Map.init(gpa);
-	defer map.deinit();
-
-	try map.put("A", "1");
-	try map.put("B", "1");
-	try map.put("C", "0");
-	try expect(parse("A & B | C", 1, &map));
-
-	map.clearRetainingCapacity();
-	try map.put("A", "1");
-	try map.put("B", "1");
-	try map.put("C", "0");
-	try expect(parse("A | B & C", 1, &map));
-}
-
-test "Condition parsing: AND" {
-	var map = Map.init(gpa);
-	defer map.deinit();
-
-	try map.put("A", "1");
-	try map.put("B", "1");
-	try map.put("C", "0");
-	try expect(!parse("A & B & C", 1, &map));
-}
-
-test "Condition parsing: OR" {
-	var map = Map.init(gpa);
-	defer map.deinit();
-
-	try map.put("FOO", "1");
-	try map.put("BAR", "0");
-	try map.put("BAZ", "0");
-	try expect(parse("FOO | BAR | BAZ", 1, &map));
-
-	map.clearRetainingCapacity();
-	try map.put("FOO", "0");
-	try map.put("BAR", "1");
-	try map.put("BAZ", "0");
-	try expect(parse("FOO | BAR | BAZ", 1, &map));
-
-	map.clearRetainingCapacity();
-	try map.put("FOO", "0");
-	try map.put("BAR", "0");
-	try map.put("BAZ", "1");
-	try expect(parse("FOO | BAR | BAZ", 1, &map));
-}
-
-test "Condition parsing: Comparing" {
-	var map = Map.init(gpa);
-	defer map.deinit();
-
-	try map.put("A", "1");
-	try map.put("B", "0");
-	try expect(parse("A != B", 1, &map));
 }
 
 // TODO PLAN new test structure

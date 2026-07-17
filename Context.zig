@@ -9,13 +9,13 @@ const Io = std.Io;
 /// Process-specific metadata
 const Self = @This();
 
-const validateKey = @import("root").validateKey;
+const max_prefix_len = 64;
 
 safe: bool = false,
-output: ?File = null,
-input: ?File = null,
-prefix: ?[]const u8 = null,
-_prefix_buf: [64]u8 = undefined,
+output: File = undefined,
+input: File = undefined,
+prefix_buf: [max_prefix_len]u8 = undefined,
+prefix_len: std.math.IntFittingRange(0, max_prefix_len - 1) = 0,
 macros: MacroMap,
 
 pub const MacroInt = isize;
@@ -36,7 +36,7 @@ const WriteState = enum(u8) {
 
 const keyword_map = std.StaticStringMap(Keyword).initComptime(kvs: {
 	const fields = @typeInfo(Keyword).@"enum".fields;
-	var result: [fields.len]struct{ []const u8, Keyword } = undefined;
+	var result: [fields.len]struct { []const u8, Keyword } = undefined;
 	for (fields, 0..) |field, i|
 		result[i] = .{ field.name, @as(Keyword, @enumFromInt(field.value)) };
 	break :kvs result;
@@ -47,23 +47,21 @@ pub fn init(gpa: Allocator) Self {
 }
 
 pub fn deinit(self: *Self, io: Io) void {
-	if (self.output) |file| file.close(io);
-	if (self.input) |file| file.close(io);
+	self.output.close(io);
+	self.input.close(io);
 	self.macros.deinit();
 }
 
 pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
-	// TODO CHECK if you've handled all errors
-	// handled by m5's validate* functions
 	var reader_buf: [1024]u8 = undefined;
-	var reader_wrapper = self.input.?.reader(io, &reader_buf);
+	var reader_wrapper = self.input.reader(io, &reader_buf);
 	const reader = &reader_wrapper.interface;
 
 	var writer_buf: [1024]u8 = undefined;
-	var writer_wrapper = self.output.?.writer(io, &writer_buf);
+	var writer_wrapper = self.output.writer(io, &writer_buf);
 	const writer = &writer_wrapper.interface;
 
-	var allocating = std.Io.Writer.Allocating.init(gpa);
+	var allocating = Io.Writer.Allocating.init(gpa);
 	defer allocating.deinit();
 
 	var state = WriteState.write;
@@ -84,12 +82,12 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 
 			const line = allocating.written();
 			const line_trimmed = a.trimWStart(line);
-			if (!a.startsWith(line_trimmed, self.prefix.?)) {
+			if (!a.startsWith(line_trimmed, self.prefix_buf[0..self.prefix_len])) {
 				if (state == .write)
 					writer.print("{s}\n", .{line}) catch return error.System;
 				continue;
 			}
-			break :cmd line_trimmed[self.prefix.?.len..];
+			break :cmd line_trimmed[self.prefix_len..];
 		};
 		var it = std.mem.tokenizeAny(u8, cmd, " \t");
 
@@ -98,6 +96,7 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 				linenr, "Expected keyword, found end of line!", .{});
 			return error.User;
 		};
+		// TODO TEST "prefix               if foo"
 		const keyword_tag: Keyword = keyword_map.get(keyword) orelse {
 			log.errWithLineNr(linenr, "Invalid keyword '{s}'!", .{keyword});
 			return error.User;
@@ -108,58 +107,55 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 				scope += 1;
 				switch (state) {
 					.write => {
-						// TODO CONSIDER
-						const expr = a.trimWEnd(cmd[it.index..]);
+						// TODO TEST "m5 if foo                            "
+						const expr = cmd["if".len..];
 						const parse_result: bool =
 							parser.parse(expr, linenr, self) catch
 							return error.User;
-						if (parse_result) continue;
-						state = .dont_write;
+						if (!parse_result) state = .dont_write;
 					},
 					.dont_write, .ignore => ignored_scopes += 1
 				}
 			},
-			.@"else" => {
-				switch (state) {
-					.write => state = .ignore,
-					.dont_write => {
-						const subkeyword = it.next() orelse {
-							state = .write;
-							continue;
-						};
-						if (!std.mem.eql(u8, subkeyword, "if")) {
-							log.errWithLineNr(linenr,
-								"'else' expects nothing or 'if', got '{s}'!",
-								.{subkeyword});
-							return error.User;
-						}
+			.@"else" => switch (state) {
+				.write => state = .ignore,
+				.dont_write => {
+					const subkeyword = it.next() orelse {
+						state = .write;
+						continue;
+					};
+					if (!std.mem.eql(u8, subkeyword, "if")) {
+						log.errWithLineNr(linenr,
+							"'else' expects nothing or 'if', found '{s}'!",
+							.{subkeyword});
+						return error.User;
+					}
 
-						const expr = a.trimWEnd(cmd[it.index..]);
-						if (expr.len == 0) {
-							log.errWithLineNr(linenr,
-								"'else if' clause expects expression!", .{});
-							return error.User;
-						}
+					const expr = a.trimWEnd(cmd[it.index..]);
+					if (expr.len == 0) {
+						log.errWithLineNr(linenr,
+							"'else if' clause expects expression!", .{});
+						return error.User;
+					}
 
-						const parse_result: bool =
-							parser.parse(expr, linenr, self) catch
-							return error.User;
-						state = if (parse_result) .write else .dont_write;
-					},
-					.ignore => {}
-				}
+					const parse_result: bool =
+						parser.parse(expr, linenr, self) catch
+						return error.User;
+					state = if (parse_result) .write else .dont_write;
+				},
+				.ignore => {}
 			},
 			.end => {
-				// TODO NOW NOW TEST nested ifs
+				// TODO NOW TEST nested ifs
 				if (scope == 0) {
 					log.errWithLineNr(
 						linenr,
-						"There can be no 'end' without prior 'if' clause!", .{});
+						"There can be no 'end' without preceeding 'if' clause!", .{});
 					return error.User;
 				}
+				scope -= 1;
 				if (ignored_scopes == 0) state = .write
 				else ignored_scopes -= 1;
-				scope -= 1;
 			}
 		}
 	}
@@ -178,6 +174,3 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 }
 
 // TODO ERRHANDLE scope becomes -1
-// TODO ERRHANDLE back offset larger than write offset
-// TODO ERRHANDLE resuming without having jumped to after
-// TODO ERRHANDLE resuming with positive scope

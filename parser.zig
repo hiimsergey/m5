@@ -25,8 +25,8 @@ const TermValueError = error{
 } || ValidateLiteralError;
 const ParseError = NextAdjustedError || TermValueError;
 
-const ParseIterator = struct{
-	const Next = struct{
+const ParseIterator = struct {
+	const Next = struct {
 		item: []const u8,
 		matched: u8
 	};
@@ -34,8 +34,8 @@ const ParseIterator = struct{
 	expr: []const u8,
 	tokens: []const u8,
 
-	pub fn init(condition: []const u8, tokens: []const u8) ParseIterator {
-		return .{ .expr = condition, .tokens = tokens };
+	fn init(expr: []const u8, tokens: []const u8) ParseIterator {
+		return .{ .expr = expr, .tokens = tokens };
 	}
 
 	/// If not null, returns next item in the iterator, respecting parentheses and matched
@@ -44,7 +44,7 @@ const ParseIterator = struct{
 	/// Returns `error.UnclosedParenthesis` if expression contains unclosed opening
 	/// parenthesis.
 	/// Does not log.
-	pub fn next(self: *ParseIterator) error{UnclosedParenthesis}!?Next {
+	fn next(self: *ParseIterator) error{UnclosedParenthesis}!?Next {
 		if (self.expr.len == 0) return null;
 		self.expr = a.trimWStart(self.expr);
 
@@ -65,6 +65,48 @@ const ParseIterator = struct{
 		// (?u8 would take up more space, as of now :pensive:)
 		defer self.expr = "";
 		return .{ .item = self.expr, .matched = 0 };
+	}
+
+	/// Instead of returning an item and the matched token, this function looks
+	/// forward and alters the upcoming string to determine the correct comparison
+	/// operator.
+	fn nextAdjusted(self: *ParseIterator) NextAdjustedError!struct {[]const u8, ?CompareOperator} {
+		std.debug.assert(std.mem.eql(u8, self.tokens, "<>="));
+
+		const nx: ParseIterator.Next = (try self.next()).?;
+		if (nx.item.len == 0) return NextAdjustedError.UnexpectedOperator;
+		// If the entire slice was returned, pass it forth.
+		if (nx.matched == 0) return .{nx.item, null};
+
+		if (nx.item[nx.item.len - 1] == '!') switch (nx.matched) {
+			'<', '>' => return NextAdjustedError.UnexpectedBangOperator,
+			'=' => {
+				const buf = nx.item[0..nx.item.len - 1];
+				return .{buf, .neq};
+			},
+			else => unreachable
+		};
+		switch (nx.matched) {
+			'<' => {
+				if (self.expr[0] == '=') {
+					self.expr = self.expr[1..];
+					return .{nx.item, .lte};
+				}
+				return .{nx.item, .lt};
+			},
+			'>' => {
+				if (self.expr[0] == '=') {
+					self.expr = self.expr[1..];
+					return .{nx.item, .gte};
+				}
+				return .{nx.item, .gt};
+			},
+			'=' => {
+				if (self.expr[0] == '=') return NextAdjustedError.DoubleEquals;
+				return .{nx.item, .eq};
+			},
+			else => unreachable
+		}
 	}
 };
 
@@ -94,7 +136,7 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 				log.errWithLineNr(linenr,
 					"Undefined macro found! (You see this error because of --safe)", .{}),
 			ParseError.UnexpectedBangOperator =>
-				log.errWithLineNr(linenr, "Unexpected operator after '!'", .{}),
+				log.errWithLineNr(linenr, "Unexpected operator after '!' !", .{}),
 			ParseError.UnexpectedExpression =>
 				log.errWithLineNr(linenr, "Expected operator, found expression!", .{}),
 			ParseError.UnexpectedOperator =>
@@ -113,21 +155,21 @@ pub fn parse(expr: []const u8, linenr: usize, ctx: *const Context) ParseError!bo
 }
 
 test parse {
-	const expTrue = struct{
-		fn f(expr: []const u8, ctx: *const Context) !void {
+	const expTrue = struct {
+		fn expTrue(expr: []const u8, ctx: *const Context) !void {
 			return try std.testing.expectEqual(true, parse(expr, 1, ctx));
 		}
-	}.f;
-	const expFalse = struct{
-		fn f(expr: []const u8, ctx: *const Context) !void {
+	}.expTrue;
+	const expFalse = struct {
+		fn expFalse(expr: []const u8, ctx: *const Context) !void {
 			return try std.testing.expectEqual(false, parse(expr, 1, ctx));
 		}
-	}.f;
-	const expError = struct{
-		fn f(e: ParseError, expr: []const u8, ctx: *const Context) !void {
+	}.expFalse;
+	const expError = struct {
+		fn expError(e: ParseError, expr: []const u8, ctx: *const Context) !void {
 			return try std.testing.expectError(e, parse(expr, 1, ctx));
 		}
-	}.f;
+	}.expError;
 
 	log.setup(std.testing.io);
 	defer log.stderr.flush() catch {};
@@ -140,6 +182,7 @@ test parse {
 	try expTrue("1", &ctx);
 	try expTrue("42", &ctx);
 	try expTrue("!0", &ctx);
+	try expTrue("-1", &ctx);
 	try expTrue("true", &ctx);
 	try expTrue("(  true )", &ctx);
 	try expTrue("(((true)))", &ctx);
@@ -153,6 +196,7 @@ test parse {
 	try expTrue("true | true", &ctx);
 	try expTrue("true | false", &ctx);
 	try expTrue("false | true", &ctx);
+	try expTrue("false|true", &ctx);
 	try expTrue("false & true | true", &ctx);
 	try expTrue("true > false", &ctx);
 	try expTrue("true>false", &ctx);
@@ -182,6 +226,7 @@ test parse {
 	try expTrue("(true > b) | (c & d)", &ctx);
 
 	try expFalse("0", &ctx);
+	try expFalse("-0", &ctx);
 	try expFalse("!1", &ctx);
 	try expFalse("!ft", &ctx);
 	try expFalse("false", &ctx);
@@ -195,6 +240,8 @@ test parse {
 	try expFalse("1 < 3 < 2", &ctx);
 	try expFalse("false | false & false", &ctx);
 	try expFalse("false & (true | true)", &ctx);
+	try expFalse("a <! b", &ctx);
+	try expFalse("5 > 2 & 1 & 0", &ctx);
 
 	const DoubleEquals = ParseError.DoubleEquals;
 	try expError(DoubleEquals, "a == b", &ctx);
@@ -211,21 +258,74 @@ test parse {
 	try expError(UnclosedParenthesis, "(((true))", &ctx);
 
 	const UnexpectedBangOperator = ParseError.UnexpectedBangOperator;
-	try exprError
+	try expError(UnexpectedBangOperator, "a!", &ctx);
+	try expError(UnexpectedBangOperator, "a!b", &ctx);
+	try expError(UnexpectedBangOperator, "a ! b", &ctx);
+	try expError(UnexpectedBangOperator, "a|!b", &ctx);
+	try expError(UnexpectedBangOperator, "a|!|b", &ctx);
+	try expError(UnexpectedBangOperator, "a !! b", &ctx);
+
+	const UnexpectedOperator = ParseError.UnexpectedOperator;
+	try expError(UnexpectedOperator, "true < = false", &ctx);
+	try expError(UnexpectedOperator, "& a", &ctx);
+	try expError(UnexpectedOperator, "a &", &ctx);
+	try expError(UnexpectedOperator, "a &| b", &ctx);
+	try expError(UnexpectedOperator, "a & & b", &ctx);
+	try expError(UnexpectedOperator, "a <> b", &ctx);
+	try expError(UnexpectedOperator, "1 < 2 < 3 <", &ctx);
 
 	const Empty = ParseError.Empty;
 	try expError(Empty, "", &ctx);
 	try expError(Empty, " ", &ctx);
 	try expError(Empty, "       ", &ctx);
+	try expError(Empty, "(  )", &ctx);
+	try expError(Empty, "( () )", &ctx);
+	try expError(Empty, "((((()))))", &ctx);
+	try expError(Empty, "() ()", &ctx);
+	try expError(Empty, "()()()", &ctx);
 
-	try expError(ParseError.UnexpectedOperator, "true < = false", &ctx);
-	try expError(ParseError.UnexpectedExpression, "(a | b) = (c & d | (e + f))", &ctx);
-	try expError(ParseError.Empty, "(  )", &ctx);
+	const UnexpectedExpression = ParseError.UnexpectedExpression;
+	try expError(UnexpectedExpression, "a b", &ctx);
+	try expError(UnexpectedExpression, "true true", &ctx);
+	try expError(UnexpectedExpression, "a()", &ctx);
+	try expError(UnexpectedExpression, "a - b", &ctx);
+	try expError(UnexpectedExpression, "(a | b) = (c & d | (e + f))", &ctx);
+
+	const UnexpectedRparen = ParseError.UnexpectedRparen;
+	try expError(UnexpectedRparen, ")", &ctx);
+	try expError(UnexpectedRparen, "())", &ctx);
+	try expError(UnexpectedRparen, "a | b  )", &ctx);
+
+	const UndefinedMacro = ParseError.UndefinedMacro;
+	ctx.safe = true;
+	_ = ctx.macros.remove("true");
+	_ = ctx.macros.remove("ft");
+	try expError(UndefinedMacro, "a", &ctx);
+	try expError(UndefinedMacro, "false", &ctx);
+	try expError(UndefinedMacro, "var0", &ctx);
+	try expError(UndefinedMacro, "var0", &ctx);
+	try expError(UndefinedMacro, "true", &ctx);
+	try expError(UndefinedMacro, "ft", &ctx);
+	ctx.safe = false;
+	try ctx.macros.put("true", 1);
+	try ctx.macros.put("ft", 42);
+	
+	const UnrepresentableNumber = ParseError.UnrepresentableNumber;
+	const bits: u32 = @typeInfo(MacroInt).int.bits;
+	const LargerInt = @Int(.signed, bits +| 1);
+	const largest = std.math.maxInt(LargerInt);
+	const smallest = std.math.minInt(LargerInt);
+	const largest_str = std.fmt.allocPrint(gpa, "{d}", .{largest});
+	const smallest_str = std.fmt.allocPrint(gpa, "{d}", .{smallest});
+	try expError(UnrepresentableNumber, largest_str, &ctx);
+	try expError(UnrepresentableNumber, smallest_str, &ctx);
+	gpa.free(largest_str);
+	gpa.free(smallest_str);
 }
 
 fn parseGates(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 	if (a.trimW(expr).len == 0) return ParseError.Empty;
-	std.debug.print("\nparseGates '{s}'\n", .{expr});
+
 	var it = ParseIterator.init(expr, "&|");
 	var result: MacroInt, var matched: u8 = result: {
 		const next: ParseIterator.Next = (try it.next()).?;
@@ -248,56 +348,15 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 	std.debug.print("parseCmp '{s}'\n", .{expr});
-	const nextAdjusted = struct{
-		/// Instead of returning an item and the matched token, this function looks
-		/// forward and alters the upcoming string to determine the correct comparison
-		/// operator.
-		fn f(it: *ParseIterator) NextAdjustedError!struct{[]const u8, ?CompareOperator} {
-			const next: ParseIterator.Next = (try it.next()).?;
-			if (next.item.len == 0) return NextAdjustedError.UnexpectedOperator;
-			// If the entire slice was returned, pass it forth.
-			if (next.matched == 0) return .{next.item, null};
-
-			if (next.item[next.item.len - 1] == '!') switch (next.matched) {
-				'<', '>' => return NextAdjustedError.UnexpectedBangOperator,
-				'=' => {
-					const buf = next.item[0..next.item.len - 1];
-					return .{buf, .neq};
-				},
-				else => unreachable
-			};
-			switch (next.matched) {
-				'<' => {
-					if (it.expr[0] == '=') {
-						it.expr = it.expr[1..];
-						return .{next.item, .lte};
-					}
-					return .{next.item, .lt};
-				},
-				'>' => {
-					if (it.expr[0] == '=') {
-						it.expr = it.expr[1..];
-						return .{next.item, .gte};
-					}
-					return .{next.item, .gt};
-				},
-				'=' => {
-					if (it.expr[0] == '=') return NextAdjustedError.DoubleEquals;
-					return .{next.item, .eq};
-				},
-				else => unreachable
-			}
-		}
-	}.f;
 
 	var it = ParseIterator.init(expr, "<>=");
 
-	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try nextAdjusted(&it);
+	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try it.nextAdjusted();
 	var lhs: MacroInt = try termValue(lhs_buf, ctx);
 	var cmp: CompareOperator = maybe_cmp orelse return lhs;
 
 	while (true) {
-		const slice: []const u8, const new_cmp: ?CompareOperator = try nextAdjusted(&it);
+		const slice: []const u8, const new_cmp: ?CompareOperator = try it.nextAdjusted();
 		const rhs: MacroInt = try termValue(slice, ctx);
 		const holds: bool = switch (cmp) {
 			.lt => lhs < rhs,

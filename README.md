@@ -89,7 +89,7 @@ TODO MENTION cmp
 TODO PLAN real code usage (lua)
 
 TODO add cli samples for necessary syntax examples
-TODO CONSIDER REMOVE [[#CLI usage]]
+TODO CONSIDER REMOVE [#CLI usage]
 
 ## CLI usage
 ```

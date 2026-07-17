@@ -3,7 +3,6 @@ const a = @import("alias.zig");
 const log = @import("log.zig");
 
 const Init = std.process.Init;
-const OpenError = std.Io.File.OpenError;
 const Context = @import("Context.zig");
 const File = std.Io.File;
 const MacroInt = Context.MacroInt;
@@ -42,11 +41,11 @@ pub fn main(init: Init) u8 {
 	return 0;
 }
 
-pub const validateKey = struct{
+pub const validateKey = struct {
 	const banned_chars = "=+-*/&|!<>() \t";
 
 	/// Returns an error and logs if `buf` can't be a valid key.
-	fn f(buf: []const u8) error{User}!void {
+	fn validateKey(buf: []const u8) error{User}!void {
 		if (buf.len == 0) {
 			log.err("Key may not have empty name!", .{});
 			return error.User;
@@ -68,7 +67,7 @@ pub const validateKey = struct{
 		};
 		return true;
 	}
-}.f;
+}.validateKey;
 
 // TODO TEST non-ascii define names, like cyrillic
 // TODO FINAL ALL TEST log.err* (branch coverage)
@@ -92,41 +91,51 @@ fn realMain(init: Init) error{User, System}!void {
 	};
 	const cwd = std.Io.Dir.cwd();
 
+	var got_input = false;
+	var got_output = false;
+
 	while (args.next()) |arg| {
 		if (arg[0] != '-') {
 			ctx.input = cwd.openFile(io, arg, .{ .mode = .read_only }) catch |e| {
-				logOpenError(e, arg);
+				log.openError(e, arg);
 				return error.User;
 			};
+			got_input = true;
 		}
 		else if (std.mem.eql(u8, arg[1..], "-help")) {
 			File.stdout().writeStreamingAll(io, help_text) catch {};
 			return;
 		}
-		// when encountering undefined variable, exit with error
+		// When encountering undefined variable, exit with error
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			// Shoutout to @MrMineDe for forcing me to implement this feature.
 			ctx.safe = true;
 		}
-		else if (std.mem.startsWith(u8, arg[1..], "o:")) {
+		else if (a.startsWith(arg[1..], "o:")) {
 			const output_path = arg["-o:".len..];
 			ctx.output = cwd.createFile(io, output_path, .{}) catch |e| {
-				logOpenError(e, arg);
-				return error.User;
+				log.openError(e, arg);
+				return switch (e) {
+					File.OpenError.FileNotFound,
+					File.OpenError.IsDir,
+					File.OpenError.AccessDenied => error.User,
+					else => error.System
+				};
 			};
+			got_output = true;
 		}
-		else if (std.mem.startsWith(u8, arg[1..], "p:")) {
+		else if (a.startsWith(arg[1..], "p:")) {
 			const prefix = arg["-p:".len..];
-			if (prefix.len > ctx._prefix_buf.len) {
+			if (prefix.len > ctx.prefix_buf.len) {
 				log.err(
 					"Prefix must be at most {d} characters (bytes) long!",
-					.{ctx._prefix_buf.len});
+					.{ctx.prefix_buf.len});
 				return error.User;
 			}
-			@memcpy(ctx._prefix_buf[0..prefix.len], prefix);
-			ctx.prefix = ctx._prefix_buf[0..prefix.len];
+			@memcpy(ctx.prefix_buf[0..prefix.len], prefix);
+			ctx.prefix_len = @intCast(prefix.len);
 		}
-		else if (std.mem.startsWith(u8, arg[1..], "d:")) {
+		else if (a.startsWith(arg[1..], "d:")) {
 			const key: []const u8, const value: MacroInt = try readDefinition(arg);
 			ctx.macros.put(key, value) catch return error.System;
 		}
@@ -136,7 +145,7 @@ fn realMain(init: Init) error{User, System}!void {
 		}
 	}
 
-	if (ctx.input == null) {
+	if (!got_input) {
 		if (!input_from_pipe) {
 			log.errWithHelp(
 				"Input must be given as a positional argument or through piping!",
@@ -146,36 +155,29 @@ fn realMain(init: Init) error{User, System}!void {
 		ctx.input = stdin;
 	}
 
-	// If no -p flag given, use "m5" as default.
-	ctx.prefix = ctx.prefix orelse "m5";
+	// If no -p flag given, use default value.
+	if (ctx.prefix_len == 0) {
+		const default_prefix = "m5";
+		@memcpy(ctx.prefix_buf[0..default_prefix.len], default_prefix);
+		ctx.prefix_len = default_prefix.len;
+	}
 
 	// If no -o flag given, print to stdout.
-	ctx.output = ctx.output orelse File.stdout();
+	if (!got_output) ctx.output = File.stdout();
 
 	// This is where the fun begins!
-	return ctx.run(gpa, io);
-}
-
-/// Does proper logging on failed file opening.
-fn logOpenError(e: OpenError, arg: []const u8) void {
-	switch (e) {
-		OpenError.FileNotFound => log.err("Input '{s}' does not exist!", .{arg}),
-		OpenError.AccessDenied =>
-			log.err("Permission to open input '{s}' denied!", .{arg}),
-		OpenError.IsDir => log.err("Input '{s}' is not a file but a dir!", .{arg}),
-		else => log.err("Failed to open input '{s}'!", .{arg})
-	}
+	return try ctx.run(gpa, io);
 }
 
 /// Logs on error.
-fn readDefinition(flag: []const u8) error{User}!struct{[]const u8, MacroInt} {
+fn readDefinition(flag: []const u8) error{User}!struct {[]const u8, MacroInt} {
 	const definition = flag["-d:".len..];
 
-	const key_cand: []const u8, const value: MacroInt = kv: {
+	const key: []const u8, const value: MacroInt = kv: {
 		const eq_index = std.mem.indexOfScalar(u8, definition, '=') orelse
 			break :kv .{definition, 1};
 
-		const key_cand = definition[0..eq_index];
+		const key = definition[0..eq_index];
 		const value_buf: []const u8 = a.trimWEnd(definition[eq_index + 1..]);
 		const value = std.fmt.parseInt(MacroInt, value_buf, 10) catch |e| {
 			switch (e) {
@@ -190,11 +192,11 @@ fn readDefinition(flag: []const u8) error{User}!struct{[]const u8, MacroInt} {
 			return error.User;
 		};
 
-		break :kv .{key_cand, value};
+		break :kv .{key, value};
 	};
 
-	try validateKey(key_cand);
-	return .{key_cand, value};
+	try validateKey(key);
+	return .{key, value};
 }
 
 test {

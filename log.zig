@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Io = std.Io;
+const OpenError = Io.File.OpenError;
 
 const error_tag = "error: ";
 
@@ -14,11 +15,7 @@ pub fn setup(io: Io) void {
 }
 
 pub fn err(comptime fmt: []const u8, args: anytype) void {
-	stderr.print("\x1b[31;1m" ++ error_tag ++ "\x1b[0m", .{}) catch |e| {
-		// TODO
-		std.debug.print("TODO hello", .{});
-		std.debug.print("{s}\n", .{@errorName(e)});
-	};
+	stderr.print("\x1b[31;1m" ++ error_tag ++ "\x1b[0m", .{}) catch {};
 
 	const fmt_indented: []const u8 = comptime fmt_indented: {
 		var it = std.mem.tokenizeScalar(u8, fmt, '\n');
@@ -30,10 +27,7 @@ pub fn err(comptime fmt: []const u8, args: anytype) void {
 		break :fmt_indented result;
 	};
 
-	stderr.print(fmt_indented, args) catch |e| {
-		// TODO
-		std.debug.print("{s}\n", .{@errorName(e)});
-	};
+	stderr.print(fmt_indented, args) catch {};
 }
 
 pub fn errWithHelp(comptime fmt: []const u8, args: anytype) void {
@@ -42,4 +36,15 @@ pub fn errWithHelp(comptime fmt: []const u8, args: anytype) void {
 
 pub fn errWithLineNr(linenr: usize, comptime fmt: []const u8, args: anytype) void {
 	err("line {d}: " ++ fmt, .{linenr} ++ args);
+}
+
+/// Logs on failed file opening.
+pub fn openError(e: OpenError, arg: []const u8) void {
+	switch (e) {
+		OpenError.FileNotFound => err("Input '{s}' does not exist!", .{arg}),
+		OpenError.AccessDenied =>
+			err("Permission to open input '{s}' denied!", .{arg}),
+		OpenError.IsDir => err("Input '{s}' is not a file but a directory!", .{arg}),
+		else => err("Failed to open input '{s}'!", .{arg})
+	}
 }
