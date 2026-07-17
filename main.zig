@@ -10,19 +10,19 @@ const MacroInt = Context.MacroInt;
 const help_text =
 	\\m5 - a simple conditional line processor
 	\\by Sergey Lavrent (https://github.com/hiimsergey/m5)
-	\\v0.4.0   GPL-3.0 license
+	\\v0.4.1   GPL-3.0 license
 	\\
 	\\Usage: m5 [<options>] <input>
 	\\
 	\\Options:
 	\\  --help               print this message
-	\\  --safe               exit with error on encountering undefined variable
+	\\  --safe               exit with error on encountering undefined macro
 	\\
 	\\  -o:<file>            write result into file
 	\\                         if not given, write to stdout
 	\\  -p:<text>            set string marking beginning of m5 directive lines
 	\\                         must be given
-	\\  -d:<key>[=<number>]  define variable with value
+	\\  -d:<key>[=<number>]  define macro with value
 	\\                         if value not given, default is 1
 	\\
 ;
@@ -69,9 +69,6 @@ pub const validateKey = struct {
 	}
 }.validateKey;
 
-// TODO TEST non-ascii define names, like cyrillic
-// TODO FINAL ALL TEST log.err* (branch coverage)
-
 fn realMain(init: Init) error{User, System}!void {
 	const gpa = init.gpa;
 	const io = init.io;
@@ -106,7 +103,7 @@ fn realMain(init: Init) error{User, System}!void {
 			File.stdout().writeStreamingAll(io, help_text) catch {};
 			return;
 		}
-		// When encountering undefined variable, exit with error
+		// When encountering undefined macros, exit with error
 		else if (std.mem.eql(u8, arg[1..], "-safe")) {
 			// Shoutout to @MrMineDe for forcing me to implement this feature.
 			ctx.safe = true;

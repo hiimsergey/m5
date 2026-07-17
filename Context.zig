@@ -107,8 +107,8 @@ pub fn run(self: *Self, gpa: Allocator, io: Io) error{User, System}!void {
 				scope += 1;
 				switch (state) {
 					.write => {
-						// TODO TEST "m5 if foo                            "
-						const expr = cmd["if".len..];
+						// TODO TEST "m5 if foo            "
+						const expr = a.trimWStart(cmd)["if".len..];
 						const parse_result: bool =
 							parser.parse(expr, linenr, self) catch
 							return error.User;

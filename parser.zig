@@ -178,12 +178,14 @@ test parse {
 	defer ctx.deinit(std.testing.io);
 	try ctx.macros.put("true", 1);
 	try ctx.macros.put("ft", 42);
+	try ctx.macros.put("верно", 1);
 
 	try expTrue("1", &ctx);
 	try expTrue("42", &ctx);
 	try expTrue("!0", &ctx);
 	try expTrue("-1", &ctx);
 	try expTrue("true", &ctx);
+	try expTrue("верно", &ctx);
 	try expTrue("(  true )", &ctx);
 	try expTrue("(((true)))", &ctx);
 	try expTrue("( ( true ) )", &ctx);
@@ -231,6 +233,7 @@ test parse {
 	try expFalse("!ft", &ctx);
 	try expFalse("false", &ctx);
 	try expFalse("(false)", &ctx);
+	try expFalse("неверно");
 	try expFalse("( 0 )", &ctx);
 	try expFalse("( false )", &ctx);
 	try expFalse("false | false", &ctx);
@@ -333,7 +336,6 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 	};
 
 	while (try it.next()) |next| {
-		std.debug.print("parseGates/next '{s}' ({c})\n", .{next.item, matched});
 		const parse_result: MacroInt = try parseCmp(next.item, ctx);
 		result = switch (matched) {
 			'&' => @intFromBool((result != 0) and (parse_result != 0)),
@@ -347,8 +349,6 @@ fn parseGates(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
 
 // TODO FINAL document the cmp behavior (like a<b<c)
 fn parseCmp(expr: []const u8, ctx: *const Context) ParseError!MacroInt {
-	std.debug.print("parseCmp '{s}'\n", .{expr});
-
 	var it = ParseIterator.init(expr, "<>=");
 
 	const lhs_buf: []const u8, const maybe_cmp: ?CompareOperator = try it.nextAdjusted();
@@ -431,7 +431,6 @@ fn findCloseParen(buf: []const u8) error{UnclosedParenthesis}!usize {
 /// Assumes that `input` is enclosed in parentheses.
 /// Returns slice of it with parens removed and whitespace of remainder trimmed.
 fn unwrapParens(buf: []const u8) []const u8 {
-	std.debug.print("unwrapParens '{s}'\n", .{buf});
 	const end: usize = findCloseParen(buf) catch unreachable;
 	return std.mem.trim(u8, buf[1..end], " \t");
 }
